@@ -13,14 +13,21 @@ import { NotFoundPage } from './pages/NotFoundPage.jsx';
 
 export default function App() {
   const location = useLocation();
+  const isLocalDevClient = typeof window !== 'undefined'
+    && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    && window.location.port === '5173';
+
   const isAdminPort = typeof window !== 'undefined' && window.location.port === '5174';
   const isAdminPath = location.pathname.startsWith('/admin');
 
-  // Dedicated Admin Portal (Running on Port 5174)
-  if (isAdminPort) {
+  // Dedicated Admin Portal (Running on Port 5174 in dev, or on /admin in production)
+  const isDedicatedAdmin = isAdminPort || (!isLocalDevClient && isAdminPath);
+
+  if (isDedicatedAdmin) {
     return (
       <div className="min-h-screen flex flex-col bg-slate-900 text-slate-100 selection:bg-indigo-600 selection:text-white">
         <Routes>
+          <Route path="/admin/*" element={<AdminPage />} />
           <Route path="*" element={<AdminPage />} />
         </Routes>
         <AuthModal />
