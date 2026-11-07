@@ -16,6 +16,7 @@ import { resetExchangeRatesCache } from './external.controller.js';
 import { resetAmadeusToken } from '../utils/amadeus.js';
 import { notifyAdminClients } from '../utils/realtime.js';
 import { env } from '../config/env.js';
+import { isDbConnected, query } from '../config/db.js';
 
 const currentFilename = fileURLToPath(import.meta.url);
 const currentDir = path.dirname(currentFilename);
@@ -34,11 +35,14 @@ const recordAuditLog = async ({
   details = {},
 }) => {
   const isDb = mongoose.connection.readyState === 1;
-  const adminId = req.user._id;
-  const adminEmail = req.user.email;
+  const adminId = (req.user?.id || req.user?._id || '').toString();
+  const adminEmail = req.user?.email || '';
   const ipAddress = req.ip || req.connection?.remoteAddress || '';
 
+  const logId = `log_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
   const logEntry = {
+    _id: logId,
+    id: logId,
     adminId,
     adminEmail,
     action,
@@ -49,16 +53,30 @@ const recordAuditLog = async ({
     details,
     ipAddress,
     createdAt: new Date(),
+    timestamp: new Date(),
   };
+
+  if (isDbConnected()) {
+    try {
+      await query(
+        `INSERT INTO audit_logs (id, action, performed_by, details, ip_address, timestamp)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [logId, action, adminEmail, JSON.stringify(logEntry), ipAddress],
+      );
+      return;
+    } catch {
+      // Fallback below
+    }
+  }
 
   if (isDb) {
     try {
       await AuditLog.create(logEntry);
     } catch {
-      memoryStore.auditLogs.unshift({ ...logEntry, _id: `log_${Date.now()}` });
+      memoryStore.auditLogs.unshift(logEntry);
     }
   } else {
-    memoryStore.auditLogs.unshift({ ...logEntry, _id: `log_${Date.now()}` });
+    memoryStore.auditLogs.unshift(logEntry);
   }
 };
 
@@ -69,6 +87,113 @@ export const getAdminStats = async (req, res, next) => {
   try {
     const isDb = mongoose.connection.readyState === 1;
     const cacheTelemetry = getFlightCacheStats();
+
+    // 1. PostgreSQL Persistent Analytics
+    if (isDbConnected()) {
+      const [
+        totalBookingsRes,
+        totalHotelsRes,
+        totalFlightsRes,
+        totalPackagesRes,
+        totalUsersRes,
+        totalAuditLogsRes,
+        recentBookingsRes,
+        revenueRes,
+        typeBreakdownRes,
+        confirmedCountRes,
+        pendingCountRes,
+        cancelledCountRes,
+      ] = await Promise.all([
+        query('SELECT COUNT(*) FROM bookings'),
+        query('SELECT COUNT(*) FROM hotels'),
+        query('SELECT COUNT(*) FROM flights'),
+        query('SELECT COUNT(*) FROM packages'),
+        query('SELECT COUNT(*) FROM users'),
+        query('SELECT COUNT(*) FROM audit_logs'),
+        query(`SELECT b.*, u.name as user_name, u.email as user_email
+               FROM bookings b LEFT JOIN users u ON b.user_id = u.id
+               ORDER BY b.created_at DESC LIMIT 6`),
+        query("SELECT COALESCE(SUM(total_price), 0) as total FROM bookings WHERE status != 'CANCELLED'"),
+        query(`SELECT booking_type, COALESCE(SUM(total_price), 0) as total, COUNT(*) as count
+               FROM bookings WHERE status != 'CANCELLED' GROUP BY booking_type`),
+        query("SELECT COUNT(*) FROM bookings WHERE status = 'CONFIRMED'"),
+        query("SELECT COUNT(*) FROM bookings WHERE status = 'PENDING'"),
+        query("SELECT COUNT(*) FROM bookings WHERE status = 'CANCELLED'"),
+      ]);
+
+      const totalBookings = parseInt(totalBookingsRes.rows[0].count, 10);
+      const totalHotels = parseInt(totalHotelsRes.rows[0].count, 10);
+      const totalFlights = parseInt(totalFlightsRes.rows[0].count, 10);
+      const totalPackages = parseInt(totalPackagesRes.rows[0].count, 10);
+      const totalUsers = parseInt(totalUsersRes.rows[0].count, 10);
+      const totalAuditLogs = parseInt(totalAuditLogsRes.rows[0].count, 10);
+      const totalRevenue = parseFloat(revenueRes.rows[0].total) || 0;
+
+      const confirmedCount = parseInt(confirmedCountRes.rows[0].count, 10);
+      const pendingCount = parseInt(pendingCountRes.rows[0].count, 10);
+      const cancelledCount = parseInt(cancelledCountRes.rows[0].count, 10);
+
+      const revenueByType = { flight: 0, hotel: 0, package: 0 };
+      typeBreakdownRes.rows.forEach((row) => {
+        const key = (row.booking_type || '').toLowerCase();
+        if (revenueByType[key] !== undefined) {
+          revenueByType[key] = parseFloat(row.total);
+        }
+      });
+
+      const conversionRate = totalBookings > 0
+        ? Number(((confirmedCount / totalBookings) * 100).toFixed(1))
+        : 0;
+      const averageOrderValue = confirmedCount > 0
+        ? Math.round(totalRevenue / confirmedCount)
+        : 0;
+
+      const recentBookings = recentBookingsRes.rows.map((row) => ({
+        _id: row.id,
+        id: row.id,
+        bookingReference: row.booking_reference,
+        type: row.booking_type,
+        itemDetails: row.item_details,
+        travelers: row.travelers,
+        contactInfo: row.contact_info,
+        totalPrice: Number(row.total_price),
+        currency: row.currency,
+        status: row.status,
+        paymentStatus: row.payment?.status || 'PAID',
+        payment: row.payment,
+        createdAt: row.created_at,
+        user: {
+          _id: row.user_id,
+          id: row.user_id,
+          name: row.user_name || 'Customer',
+          email: row.user_email || row.contact_info?.email,
+        },
+      }));
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          totalBookings,
+          totalRevenue,
+          totalHotels,
+          totalFlights,
+          totalPackages,
+          totalUsers,
+          totalAuditLogs,
+          conversionRate,
+          averageOrderValue,
+          revenueByType,
+          cacheTelemetry,
+          systemUptime: Math.round(process.uptime()),
+          statusBreakdown: {
+            confirmed: confirmedCount,
+            pending: pendingCount,
+            cancelled: cancelledCount,
+          },
+          recentBookings,
+        },
+      });
+    }
 
     if (isDb) {
       const [
@@ -218,6 +343,59 @@ export const getAllBookings = async (req, res, next) => {
     const { status, type } = req.query;
     const isDb = mongoose.connection.readyState === 1;
 
+    // 1. PostgreSQL Persistent Lookup
+    if (isDbConnected()) {
+      let sql = `SELECT b.*, u.name as user_name, u.email as user_email, u.phone as user_phone
+                 FROM bookings b
+                 LEFT JOIN users u ON b.user_id = u.id`;
+      const params = [];
+      const conditions = [];
+
+      if (status && status !== 'all') {
+        params.push(status.toUpperCase());
+        conditions.push(`b.status = $${params.length}`);
+      }
+      if (type && type !== 'all') {
+        params.push(type.toLowerCase());
+        conditions.push(`LOWER(b.booking_type) = $${params.length}`);
+      }
+
+      if (conditions.length > 0) {
+        sql += ` WHERE ${conditions.join(' AND ')}`;
+      }
+      sql += ' ORDER BY b.created_at DESC';
+
+      const result = await query(sql, params);
+      const mapped = result.rows.map((row) => ({
+        _id: row.id,
+        id: row.id,
+        bookingReference: row.booking_reference,
+        type: row.booking_type,
+        itemDetails: row.item_details,
+        travelers: row.travelers,
+        contactInfo: row.contact_info,
+        totalPrice: Number(row.total_price),
+        currency: row.currency,
+        status: row.status,
+        paymentStatus: row.payment?.status || 'PAID',
+        payment: row.payment,
+        createdAt: row.created_at,
+        user: {
+          _id: row.user_id,
+          id: row.user_id,
+          name: row.user_name || 'Customer',
+          email: row.user_email || row.contact_info?.email,
+          phone: row.user_phone || row.contact_info?.phone,
+        },
+      }));
+
+      return res.status(200).json({
+        success: true,
+        count: mapped.length,
+        data: mapped,
+      });
+    }
+
     if (isDb) {
       const filter = {};
       if (status) filter.status = status;
@@ -256,6 +434,82 @@ export const updateBookingStatus = async (req, res, next) => {
     const { id } = req.params;
     const { status, paymentStatus } = req.body;
     const isDb = mongoose.connection.readyState === 1;
+
+    // 1. PostgreSQL Persistent Update
+    if (isDbConnected()) {
+      const selectRes = await query(
+        `SELECT b.*, u.name as user_name, u.email as user_email, u.phone as user_phone
+         FROM bookings b
+         LEFT JOIN users u ON b.user_id = u.id
+         WHERE b.id = $1 OR b.booking_reference = $1`,
+        [id],
+      );
+
+      if (selectRes.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Booking not found.' });
+      }
+
+      const row = selectRes.rows[0];
+      const newStatus = status ? status.toUpperCase() : row.status;
+      const paymentObj = row.payment || {};
+      if (paymentStatus) {
+        paymentObj.status = paymentStatus.toUpperCase();
+      }
+
+      const updateRes = await query(
+        `UPDATE bookings
+         SET status = $1, payment = $2, updated_at = NOW()
+         WHERE id = $3
+         RETURNING *`,
+        [newStatus, JSON.stringify(paymentObj), row.id],
+      );
+
+      const updatedRow = updateRes.rows[0];
+      const updatedBooking = {
+        _id: updatedRow.id,
+        id: updatedRow.id,
+        bookingReference: updatedRow.booking_reference,
+        type: updatedRow.booking_type,
+        itemDetails: updatedRow.item_details,
+        travelers: updatedRow.travelers,
+        contactInfo: updatedRow.contact_info,
+        totalPrice: Number(updatedRow.total_price),
+        currency: updatedRow.currency,
+        status: updatedRow.status,
+        paymentStatus: updatedRow.payment?.status || 'PAID',
+        payment: updatedRow.payment,
+        createdAt: updatedRow.created_at,
+        user: {
+          _id: row.user_id,
+          id: row.user_id,
+          name: row.user_name || 'Customer',
+          email: row.user_email || row.contact_info?.email,
+          phone: row.user_phone || row.contact_info?.phone,
+        },
+      };
+
+      await recordAuditLog({
+        req,
+        action: `BOOKING_${(status || paymentStatus || 'UPDATED').toUpperCase()}`,
+        targetType: 'Booking',
+        targetId: updatedBooking._id,
+        targetName: `Booking #${updatedBooking._id.slice(-6).toUpperCase()}`,
+        reason: req.body?.reason || `Administrator updated booking status to ${status || paymentStatus}`,
+        details: {
+          status: updatedBooking.status,
+          paymentStatus: updatedBooking.paymentStatus,
+          customer: updatedBooking.user?.email,
+        },
+      });
+
+      notifyAdminClients('booking_updated', updatedBooking);
+
+      return res.status(200).json({
+        success: true,
+        message: `Booking successfully marked as ${status || paymentStatus}.`,
+        data: updatedBooking,
+      });
+    }
 
     if (isDb) {
       const booking = await Booking.findById(id);
@@ -684,6 +938,13 @@ export const deleteFlight = async (req, res, next) => {
  */
 export const getAdminUsers = async (req, res, next) => {
   try {
+    if (isDbConnected()) {
+      const resUsers = await query(
+        'SELECT id, id as "_id", name, email, role, phone, created_at as "createdAt" FROM users ORDER BY created_at DESC',
+      );
+      return res.status(200).json({ success: true, count: resUsers.rows.length, data: resUsers.rows });
+    }
+
     if (mongoose.connection.readyState === 1) {
       const users = await User.find().select('-passwordHash').sort({ createdAt: -1 });
       return res.status(200).json({ success: true, count: users.length, data: users });
@@ -709,6 +970,18 @@ export const updateUserRole = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { role } = req.body;
+    const normalizedRole = (role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'CUSTOMER';
+
+    if (isDbConnected()) {
+      const resUpdate = await query(
+        'UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2 RETURNING id, id as "_id", name, email, role, phone',
+        [normalizedRole, id],
+      );
+      if (resUpdate.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+      return res.status(200).json({ success: true, message: `User role updated to ${normalizedRole}.`, data: resUpdate.rows[0] });
+    }
 
     if (mongoose.connection.readyState === 1) {
       const user = await User.findById(id);
@@ -743,6 +1016,41 @@ export const deleteBooking = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'A specific reason is required before cancelling/deleting this booking (minimum 3 characters).',
+      });
+    }
+
+    if (isDbConnected()) {
+      const selectRes = await query(
+        `SELECT b.*, u.name as user_name, u.email as user_email
+         FROM bookings b LEFT JOIN users u ON b.user_id = u.id
+         WHERE b.id = $1 OR b.booking_reference = $1`,
+        [id],
+      );
+
+      if (selectRes.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Booking not found.' });
+      }
+
+      const booking = selectRes.rows[0];
+      const bookingTitle = `Booking #${booking.id.slice(-6).toUpperCase()} (${booking.booking_type}) for ${booking.user_email || 'Customer'}`;
+      await recordAuditLog({
+        req,
+        action: 'DELETE_BOOKING',
+        targetType: 'Booking',
+        targetId: booking.id,
+        targetName: bookingTitle,
+        reason,
+        details: {
+          totalPrice: booking.total_price,
+          type: booking.booking_type,
+          status: booking.status,
+        },
+      });
+
+      await query('DELETE FROM bookings WHERE id = $1', [booking.id]);
+      return res.status(200).json({
+        success: true,
+        message: 'Booking deleted and audit log recorded.',
       });
     }
 
@@ -809,6 +1117,24 @@ export const deleteBooking = async (req, res, next) => {
  */
 export const getAdminAuditLogs = async (req, res, next) => {
   try {
+    if (isDbConnected()) {
+      const logsRes = await query(
+        'SELECT id, id as "_id", action, performed_by as "adminEmail", details, ip_address as "ipAddress", timestamp as "createdAt" FROM audit_logs ORDER BY timestamp DESC LIMIT 100',
+      );
+      const parsedLogs = logsRes.rows.map((row) => ({
+        ...row,
+        targetType: row.details?.targetType || 'System',
+        targetName: row.details?.targetName || row.action,
+        reason: row.details?.reason || '',
+        adminId: { email: row.adminEmail },
+      }));
+      return res.status(200).json({
+        success: true,
+        count: parsedLogs.length,
+        data: parsedLogs,
+      });
+    }
+
     if (mongoose.connection.readyState === 1) {
       const logs = await AuditLog.find()
         .sort({ createdAt: -1 })
@@ -1003,15 +1329,23 @@ export const deletePackage = async (req, res, next) => {
 export const getSystemHealth = async (req, res, next) => {
   try {
     const mem = process.memoryUsage();
-    const isDbConnected = mongoose.connection.readyState === 1;
+    const isMongooseConnected = mongoose.connection.readyState === 1;
+    const isPostgresActive = isDbConnected();
     const cacheStats = getFlightCacheStats();
+
+    let dbStatus = 'In-Memory Mirror Active';
+    if (isPostgresActive) {
+      dbStatus = 'PostgreSQL (Render) Connected';
+    } else if (isMongooseConnected) {
+      dbStatus = 'MongoDB Atlas Connected';
+    }
 
     return res.status(200).json({
       success: true,
       data: {
         database: {
-          connected: isDbConnected,
-          status: isDbConnected ? 'MongoDB Atlas Connected' : 'In-Memory Mirror Active',
+          connected: isPostgresActive || isMongooseConnected,
+          status: dbStatus,
           readyState: mongoose.connection.readyState,
           host: mongoose.connection.host || 'local_cluster',
         },
@@ -1092,6 +1426,18 @@ let memorySettings = {
  */
 export const getPlatformSettings = async (req, res, next) => {
   try {
+    if (isDbConnected()) {
+      const resSettings = await query('SELECT value FROM settings WHERE key = $1', ['global_saas_config']);
+      if (resSettings.rows.length > 0) {
+        return res.status(200).json({ success: true, data: resSettings.rows[0].value });
+      }
+      await query(
+        'INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO NOTHING',
+        ['global_saas_config', JSON.stringify(memorySettings)],
+      );
+      return res.status(200).json({ success: true, data: memorySettings });
+    }
+
     if (mongoose.connection.readyState === 1) {
       let settings = await Setting.findOne({ key: 'global_saas_config' });
       if (!settings) {
@@ -1124,6 +1470,34 @@ export const updatePlatformSettings = async (req, res, next) => {
     if (maintenanceMode !== undefined) updatePayload.maintenanceMode = Boolean(maintenanceMode);
     if (announcementBanner) updatePayload.announcementBanner = announcementBanner;
     if (currencyRates) updatePayload.currencyRates = currencyRates;
+
+    if (isDbConnected()) {
+      const currentRes = await query('SELECT value FROM settings WHERE key = $1', ['global_saas_config']);
+      const currentVal = currentRes.rows.length > 0 ? currentRes.rows[0].value : memorySettings;
+      const mergedVal = { ...currentVal, ...updatePayload };
+
+      await query(
+        `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+        ['global_saas_config', JSON.stringify(mergedVal)],
+      );
+
+      await recordAuditLog({
+        req,
+        action: 'UPDATE_SETTINGS',
+        targetType: 'Settings',
+        targetId: 'global_saas_config',
+        targetName: 'Platform Global Settings',
+        reason: req.body?.reason || 'Administrator adjusted SaaS commission or banner parameters',
+        details: updatePayload,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Platform settings saved successfully.',
+        data: mergedVal,
+      });
+    }
 
     if (mongoose.connection.readyState === 1) {
       const updated = await Setting.findOneAndUpdate(
@@ -1206,9 +1580,21 @@ let activeMasterPin = process.env.ADMIN_SECURITY_PIN || '1234';
  */
 export const getApiKeysStatus = async (req, res, next) => {
   try {
-    const isDbConnected = mongoose.connection.readyState === 1;
+    const isPostgresActive = isDbConnected();
 
     const services = [
+      {
+        id: 'postgresql',
+        name: 'Render PostgreSQL Primary Database',
+        envVar: 'DATABASE_URL',
+        category: 'Primary Relational Database',
+        status: isPostgresActive ? 'connected' : 'standby',
+        maskedKey: maskKey(process.env.DATABASE_URL || env.DATABASE_URL),
+        quota: 'Render Managed PostgreSQL',
+        caching: 'Connection Pooling with SSL (Max 10)',
+        lastPing: isPostgresActive ? 'Connected & Ready' : 'Standby / Local In-Memory Store',
+        docsUrl: 'https://render.com/docs/databases',
+      },
       {
         id: 'aviationstack',
         name: 'Aviationstack Flight Radar API',

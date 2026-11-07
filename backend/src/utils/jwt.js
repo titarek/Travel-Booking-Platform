@@ -2,14 +2,15 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 
 /**
- * Generate a signed JWT token containing strictly { id, email }
- * @param {Object} user - User document
+ * Generate a signed JWT token containing { id, email, role }
+ * @param {Object} user - User document or row
  * @returns {string} Signed JWT
  */
 export const generateToken = (user) => {
   const payload = {
-    id: user._id.toString(),
+    id: (user.id || user._id || '').toString(),
     email: user.email,
+    role: (user.role || 'CUSTOMER').toUpperCase(),
   };
 
   return jwt.sign(payload, env.JWT_SECRET, {

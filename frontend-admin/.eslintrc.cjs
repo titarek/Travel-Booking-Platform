@@ -1,0 +1,46 @@
+module.exports = {
+  env: {
+    browser: true,
+    es2022: true,
+  },
+  extends: [
+    'airbnb',
+    'airbnb/hooks',
+  ],
+  parserOptions: {
+    ecmaFeatures: {
+      jsx: true,
+    },
+    ecmaVersion: 'latest',
+    sourceType: 'module',
+  },
+  plugins: [
+    'react',
+    'react-hooks',
+  ],
+  rules: {
+    'react/react-in-jsx-scope': 'off',
+    'react/prop-types': 'off',
+    'react/jsx-props-no-spreading': 'off',
+    'react/jsx-one-expression-per-line': 'off',
+    'react/function-component-definition': 'off',
+    'react/no-array-index-key': 'off',
+    'react/button-has-type': 'off',
+    'import/no-extraneous-dependencies': 'off',
+    'import/extensions': 'off',
+    'import/prefer-default-export': 'off',
+    'no-underscore-dangle': ['error', { allow: ['_id', '__v'] }],
+    'no-nested-ternary': 'off',
+    'no-alert': 'off',
+    'no-console': 'off',
+    'no-param-reassign': ['error', { props: false }],
+    'no-mixed-operators': 'off',
+    'object-curly-newline': 'off',
+    'jsx-a11y/no-autofocus': 'off',
+    'jsx-a11y/click-events-have-key-events': 'off',
+    'jsx-a11y/no-static-element-interactions': 'off',
+    'jsx-a11y/no-noninteractive-element-interactions': 'off',
+    'jsx-a11y/label-has-associated-control': 'off',
+    'max-len': 'off',
+  },
+};

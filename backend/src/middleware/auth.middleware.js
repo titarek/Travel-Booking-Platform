@@ -2,10 +2,11 @@ import mongoose from 'mongoose';
 import { verifyToken } from '../utils/jwt.js';
 import { User } from '../models/user.model.js';
 import { memoryStore } from '../utils/memoryStore.js';
+import { isDbConnected, query } from '../config/db.js';
 
 /**
  * Authentication middleware
- * Verifies JWT and attaches req.user via fresh DB lookup
+ * Verifies JWT and attaches req.user via fresh DB / PostgreSQL lookup
  */
 export const authenticate = async (req, res, next) => {
   try {
@@ -34,12 +35,34 @@ export const authenticate = async (req, res, next) => {
       });
     }
 
-    // Fresh DB lookup
-    let user;
-    if (mongoose.connection.readyState === 1) {
-      user = await User.findById(decoded.id).select('-passwordHash');
+    // Lookup user in PostgreSQL, MongoDB, or resilient MemoryStore
+    let user = null;
+    if (isDbConnected()) {
+      const result = await query(
+        'SELECT id, name, email, role, phone, created_at, updated_at FROM users WHERE id = $1',
+        [decoded.id],
+      );
+      if (result.rows.length > 0) {
+        const row = result.rows[0];
+        user = {
+          ...row,
+          _id: row.id,
+          role: (row.role || 'CUSTOMER').toUpperCase(),
+        };
+      }
+    } else if (mongoose.connection.readyState === 1) {
+      const mongoUser = await User.findById(decoded.id).select('-passwordHash');
+      if (mongoUser) {
+        user = mongoUser.toObject();
+        user.role = (user.role || 'CUSTOMER').toUpperCase();
+      }
     } else {
-      user = memoryStore.users.find((u) => u._id.toString() === decoded.id);
+      const memUser = memoryStore.users.find(
+        (u) => u.id === decoded.id || u._id?.toString() === decoded.id,
+      );
+      if (memUser) {
+        user = { ...memUser, role: (memUser.role || 'CUSTOMER').toUpperCase() };
+      }
     }
 
     if (!user) {
@@ -58,9 +81,11 @@ export const authenticate = async (req, res, next) => {
 
 /**
  * Authorization middleware for administrative privileges
+ * Strictly verifies role is 'ADMIN'
  */
 export const authorizeAdmin = (req, res, next) => {
-  if (!req.user || req.user.role !== 'admin') {
+  const role = (req.user?.role || '').toUpperCase();
+  if (!req.user || role !== 'ADMIN') {
     return res.status(403).json({
       success: false,
       message: 'Access denied. Administrator privileges required.',

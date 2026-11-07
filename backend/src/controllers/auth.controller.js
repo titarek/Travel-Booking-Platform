@@ -3,10 +3,12 @@ import bcrypt from 'bcryptjs';
 import { User } from '../models/user.model.js';
 import { generateToken } from '../utils/jwt.js';
 import { memoryStore } from '../utils/memoryStore.js';
+import { isDbConnected, query } from '../config/db.js';
 
 /**
- * Register a new user
+ * Register a new customer
  * Hashes password with bcrypt cost 12
+ * Assigns role CUSTOMER
  * Never returns passwordHash
  */
 export const register = async (req, res, next) => {
@@ -20,15 +22,63 @@ export const register = async (req, res, next) => {
       securityAnswer,
     } = req.body;
 
-    const isDbConnected = mongoose.connection.readyState === 1;
+    const normalizedEmail = (email || '').toLowerCase().trim();
 
     let securityAnswerHash = '';
     if (securityAnswer) {
       securityAnswerHash = await bcrypt.hash(securityAnswer.toLowerCase().trim(), 12);
     }
 
-    if (isDbConnected) {
-      const existingUser = await User.findOne({ email });
+    const passwordHash = await bcrypt.hash(password, 12);
+    const id = `usr-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+
+    // 1. PostgreSQL Persistent Storage
+    if (isDbConnected()) {
+      const existingUser = await query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
+      if (existingUser.rows.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: 'An account with this email already exists.',
+        });
+      }
+
+      const insertRes = await query(
+        `INSERT INTO users (id, name, email, password_hash, role, phone, security_question, security_answer_hash)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id, name, email, role, phone, created_at`,
+        [
+          id,
+          name,
+          normalizedEmail,
+          passwordHash,
+          'CUSTOMER',
+          phone || '',
+          securityQuestion || '',
+          securityAnswerHash,
+        ],
+      );
+
+      const createdUser = insertRes.rows[0];
+      const token = generateToken(createdUser);
+
+      return res.status(201).json({
+        success: true,
+        message: 'Account successfully created.',
+        token,
+        user: {
+          id: createdUser.id,
+          _id: createdUser.id,
+          name: createdUser.name,
+          email: createdUser.email,
+          phone: createdUser.phone,
+          role: 'CUSTOMER',
+        },
+      });
+    }
+
+    // 2. MongoDB Fallback
+    if (mongoose.connection.readyState === 1) {
+      const existingUser = await User.findOne({ email: normalizedEmail });
       if (existingUser) {
         return res.status(409).json({
           success: false,
@@ -36,14 +86,12 @@ export const register = async (req, res, next) => {
         });
       }
 
-      // Hash password with explicit cost 12
-      const passwordHash = await bcrypt.hash(password, 12);
-
       const user = await User.create({
         name,
-        email,
+        email: normalizedEmail,
         passwordHash,
         phone: phone || '',
+        role: 'CUSTOMER',
         securityQuestion: securityQuestion || '',
         securityAnswerHash,
       });
@@ -56,16 +104,17 @@ export const register = async (req, res, next) => {
         token,
         user: {
           id: user._id,
+          _id: user._id,
           name: user.name,
           email: user.email,
           phone: user.phone,
-          role: user.role,
+          role: 'CUSTOMER',
         },
       });
     }
 
-    // Memory store fallback
-    const existing = memoryStore.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+    // 3. Resilient In-Memory Fallback
+    const existing = memoryStore.users.find((u) => u.email.toLowerCase() === normalizedEmail);
     if (existing) {
       return res.status(409).json({
         success: false,
@@ -73,14 +122,14 @@ export const register = async (req, res, next) => {
       });
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
     const newUser = {
-      _id: `64a1b2c3d4e5f6789012${Math.floor(1000 + Math.random() * 9000)}`,
+      _id: id,
+      id,
       name,
-      email,
+      email: normalizedEmail,
       passwordHash,
       phone: phone || '',
-      role: 'user',
+      role: 'CUSTOMER',
       securityQuestion: securityQuestion || '',
       securityAnswerHash,
       createdAt: new Date(),
@@ -94,11 +143,12 @@ export const register = async (req, res, next) => {
       message: 'Account successfully created.',
       token,
       user: {
-        id: newUser._id,
+        id: newUser.id,
+        _id: newUser.id,
         name: newUser.name,
         email: newUser.email,
         phone: newUser.phone,
-        role: newUser.role,
+        role: 'CUSTOMER',
       },
     });
   } catch (error) {
@@ -108,28 +158,77 @@ export const register = async (req, res, next) => {
 
 /**
  * Login user with email & password
- * Signs JWT token with { id, email }
+ * Signs JWT token with { id, email, role }
  */
 export const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    const isDbConnected = mongoose.connection.readyState === 1;
+    const normalizedEmail = (email || '').toLowerCase().trim();
 
-    let user;
-    if (isDbConnected) {
-      user = await User.findOne({ email }).select('+passwordHash');
+    let user = null;
+    let passwordHash = null;
+
+    // 1. PostgreSQL Persistent Lookup
+    if (isDbConnected()) {
+      const result = await query(
+        `SELECT id, name, email, password_hash, role, phone, security_question, created_at
+         FROM users WHERE LOWER(email) = LOWER($1)`,
+        [normalizedEmail],
+      );
+
+      if (result.rows.length > 0) {
+        const row = result.rows[0];
+        passwordHash = row.password_hash;
+        user = {
+          id: row.id,
+          _id: row.id,
+          name: row.name,
+          email: row.email,
+          phone: row.phone,
+          role: (row.role || 'CUSTOMER').toUpperCase(),
+          createdAt: row.created_at,
+        };
+      }
+    } else if (mongoose.connection.readyState === 1) {
+      // 2. MongoDB Lookup
+      const mongoUser = await User.findOne({ email: normalizedEmail }).select('+passwordHash');
+      if (mongoUser) {
+        passwordHash = mongoUser.passwordHash;
+        user = {
+          id: mongoUser._id.toString(),
+          _id: mongoUser._id.toString(),
+          name: mongoUser.name,
+          email: mongoUser.email,
+          phone: mongoUser.phone,
+          role: (mongoUser.role || 'CUSTOMER').toUpperCase(),
+        };
+      }
     } else {
-      user = memoryStore.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+      // 3. MemoryStore Lookup
+      const memUser = memoryStore.users.find(
+        (u) => u.email.toLowerCase() === normalizedEmail,
+      );
+      if (memUser) {
+        passwordHash = memUser.passwordHash;
+        user = {
+          id: memUser.id || memUser._id.toString(),
+          _id: memUser.id || memUser._id.toString(),
+          name: memUser.name,
+          email: memUser.email,
+          phone: memUser.phone,
+          role: (memUser.role || 'CUSTOMER').toUpperCase(),
+        };
+      }
     }
 
-    if (!user) {
+    if (!user || !passwordHash) {
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password.',
       });
     }
 
-    const isMatch = await bcrypt.compare(password, user.passwordHash);
+    const isMatch = await bcrypt.compare(password, passwordHash);
     if (!isMatch) {
       return res.status(401).json({
         success: false,
@@ -144,7 +243,8 @@ export const login = async (req, res, next) => {
       message: 'Logged in successfully.',
       token,
       user: {
-        id: user._id,
+        id: user.id,
+        _id: user.id,
         name: user.name,
         email: user.email,
         phone: user.phone,
@@ -160,15 +260,17 @@ export const login = async (req, res, next) => {
  * Get current authenticated user profile
  */
 export const getMe = async (req, res) => {
+  const role = (req.user.role || 'CUSTOMER').toUpperCase();
   res.status(200).json({
     success: true,
     user: {
-      id: req.user._id,
+      id: req.user.id || req.user._id,
+      _id: req.user.id || req.user._id,
       name: req.user.name,
       email: req.user.email,
       phone: req.user.phone,
-      role: req.user.role,
-      createdAt: req.user.createdAt,
+      role,
+      createdAt: req.user.createdAt || req.user.created_at,
     },
   });
 };
@@ -183,22 +285,30 @@ export const getSecurityQuestion = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Please provide an email address.' });
     }
 
-    const isDbConnected = mongoose.connection.readyState === 1;
-    let user;
-    if (isDbConnected) {
-      user = await User.findOne({ email: email.toLowerCase().trim() });
+    const normalizedEmail = email.toLowerCase().trim();
+    let securityQuestion = null;
+
+    if (isDbConnected()) {
+      const resPg = await query('SELECT security_question FROM users WHERE LOWER(email) = LOWER($1)', [normalizedEmail]);
+      if (resPg.rows.length > 0) {
+        securityQuestion = resPg.rows[0].security_question;
+      }
+    } else if (mongoose.connection.readyState === 1) {
+      const u = await User.findOne({ email: normalizedEmail });
+      securityQuestion = u?.securityQuestion;
     } else {
-      user = memoryStore.users.find((u) => u.email.toLowerCase() === email.toLowerCase().trim());
+      const u = memoryStore.users.find((mem) => mem.email.toLowerCase() === normalizedEmail);
+      securityQuestion = u?.securityQuestion;
     }
 
-    if (!user) {
+    if (securityQuestion === undefined || securityQuestion === null) {
       return res.status(404).json({
         success: false,
         message: 'No registered account found with this email address.',
       });
     }
 
-    if (!user.securityQuestion) {
+    if (!securityQuestion) {
       return res.status(400).json({
         success: false,
         message: 'No security question is configured for this account. Please contact support.',
@@ -207,8 +317,8 @@ export const getSecurityQuestion = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      email: user.email,
-      securityQuestion: user.securityQuestion,
+      email: normalizedEmail,
+      securityQuestion,
     });
   } catch (error) {
     return next(error);
@@ -236,23 +346,33 @@ export const resetPasswordWithSecurityAnswer = async (req, res, next) => {
       });
     }
 
-    const isDbConnected = mongoose.connection.readyState === 1;
-    let user;
+    const normalizedEmail = email.toLowerCase().trim();
+    let securityAnswerHash = null;
 
-    if (isDbConnected) {
-      user = await User.findOne({ email: email.toLowerCase().trim() }).select('+passwordHash +securityAnswerHash');
+    if (isDbConnected()) {
+      const resPg = await query(
+        'SELECT id, security_answer_hash FROM users WHERE LOWER(email) = LOWER($1)',
+        [normalizedEmail],
+      );
+      if (resPg.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'No account found with this email address.' });
+      }
+      securityAnswerHash = resPg.rows[0].security_answer_hash;
+    } else if (mongoose.connection.readyState === 1) {
+      const u = await User.findOne({ email: normalizedEmail }).select('+passwordHash +securityAnswerHash');
+      if (!u) {
+        return res.status(404).json({ success: false, message: 'No account found with this email address.' });
+      }
+      securityAnswerHash = u.securityAnswerHash;
     } else {
-      user = memoryStore.users.find((u) => u.email.toLowerCase() === email.toLowerCase().trim());
+      const u = memoryStore.users.find((mem) => mem.email.toLowerCase() === normalizedEmail);
+      if (!u) {
+        return res.status(404).json({ success: false, message: 'No account found with this email address.' });
+      }
+      securityAnswerHash = u.securityAnswerHash;
     }
 
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'No account found with this email address.',
-      });
-    }
-
-    if (!user.securityAnswerHash) {
+    if (!securityAnswerHash) {
       return res.status(400).json({
         success: false,
         message: 'No security question answer is recorded for this account.',
@@ -260,7 +380,7 @@ export const resetPasswordWithSecurityAnswer = async (req, res, next) => {
     }
 
     const cleanAnswer = securityAnswer.toLowerCase().trim();
-    const isAnswerMatch = await bcrypt.compare(cleanAnswer, user.securityAnswerHash);
+    const isAnswerMatch = await bcrypt.compare(cleanAnswer, securityAnswerHash);
 
     if (!isAnswerMatch) {
       return res.status(401).json({
@@ -270,10 +390,17 @@ export const resetPasswordWithSecurityAnswer = async (req, res, next) => {
     }
 
     const newPasswordHash = await bcrypt.hash(newPassword, 12);
-    user.passwordHash = newPasswordHash;
 
-    if (isDbConnected) {
-      await user.save();
+    if (isDbConnected()) {
+      await query(
+        'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE LOWER(email) = LOWER($2)',
+        [newPasswordHash, normalizedEmail],
+      );
+    } else if (mongoose.connection.readyState === 1) {
+      await User.updateOne({ email: normalizedEmail }, { passwordHash: newPasswordHash });
+    } else {
+      const u = memoryStore.users.find((mem) => mem.email.toLowerCase() === normalizedEmail);
+      if (u) u.passwordHash = newPasswordHash;
     }
 
     return res.status(200).json({

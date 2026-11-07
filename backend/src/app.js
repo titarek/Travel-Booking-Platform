@@ -26,6 +26,7 @@ const allowedOrigins = [
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
   env.CLIENT_ORIGIN,
+  env.ADMIN_ORIGIN,
 ].filter(Boolean);
 
 app.use(cors({
