@@ -44,3 +44,4 @@ databases:
     region: oregon
     databaseName: travel_db
     user: travel_user
+

@@ -40,6 +40,7 @@ import { Button } from '../components/ui/Button.jsx';
 import { Badge } from '../components/ui/Badge.jsx';
 import { Modal } from '../components/ui/Modal.jsx';
 import { Input } from '../components/ui/Input.jsx';
+import { AdminLoginForm } from '../components/auth/AdminLoginForm.jsx';
 import api from '../api/axios.js';
 
 // Helper to export tabular data as CSV for SaaS reporting
@@ -67,7 +68,6 @@ export const AdminPage = () => {
   const {
     user,
     logout,
-    openAuthModal,
     currency,
     exchangeRates,
   } = useAuth();
@@ -966,55 +966,9 @@ export const AdminPage = () => {
     showToast('Audit trail exported to CSV.');
   };
 
-  // Access Gate: If not logged in as Admin, show restricted access (hidden from regular customers)
+  // Access Gate: If not logged in as Admin, show direct Administrator Sign In page (no registration)
   if (!isAdmin) {
-    return (
-      <div className="min-h-[80vh] flex items-center justify-center py-16 px-4">
-        <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-slate-200/80 shadow-2xl space-y-6 text-center animate-in fade-in zoom-in-95 duration-200">
-          <div className="h-16 w-16 rounded-3xl bg-rose-50 border border-rose-100 flex items-center justify-center mx-auto text-rose-600 shadow-sm">
-            <Lock className="h-8 w-8" />
-          </div>
-
-          <div className="space-y-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-rose-600 px-3 py-1 bg-rose-50 rounded-full">
-              Access Restricted
-            </span>
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-              Administrator Portal
-            </h1>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              This area is reserved strictly for authenticated system administrators. Customers and unauthenticated visitors do not have access to platform management facilities.
-            </p>
-          </div>
-
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-left space-y-2 text-xs text-slate-600">
-            <p className="font-semibold text-slate-800">
-              Need administrator access?
-            </p>
-            <p className="text-[11px] text-slate-500 leading-normal">
-              Please sign in using an authorized administrator account to unlock live operations, inventory controls, and audit logs.
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-3">
-            <a
-              href="http://localhost:5173"
-              className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50 transition-colors text-center"
-            >
-              Client Portal (5173)
-            </a>
-            <Button
-              type="button"
-              variant="primary"
-              onClick={() => openAuthModal('login', { adminOnly: true })}
-              className="flex-1 py-2.5 font-bold rounded-xl text-xs bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-500/20"
-            >
-              Sign In to Admin
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
+    return <AdminLoginForm />;
   }
 
   if (loading && !stats) {

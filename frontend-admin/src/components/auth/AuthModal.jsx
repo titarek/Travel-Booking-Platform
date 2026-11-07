@@ -458,7 +458,7 @@ export const AuthModal = () => {
                   icon={Lock}
                   required
                 />
-                {!isAdminView && isLogin && (
+                {isLogin && (
                   <div className="flex justify-end pt-1">
                     <button
                       type="button"
