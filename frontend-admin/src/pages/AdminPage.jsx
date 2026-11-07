@@ -64,6 +64,8 @@ const exportToCSV = (filename, rows) => {
   document.body.removeChild(link);
 };
 
+const CLIENT_PORTAL_URL = import.meta.env.VITE_CLIENT_PORTAL_URL || 'https://travel-booking-platform-u2vi.vercel.app/';
+
 export const AdminPage = () => {
   const {
     user,
@@ -1024,12 +1026,14 @@ export const AdminPage = () => {
 
           {/* Quick exit to client portal */}
           <a
-            href="http://localhost:5173"
+            href={CLIENT_PORTAL_URL}
+            target="_blank"
+            rel="noopener noreferrer"
             className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all text-xs font-bold group"
           >
             <span className="flex items-center gap-2">
               <ArrowLeft className="h-4 w-4 text-indigo-400 group-hover:-translate-x-1 transition-transform" />
-              <span>Client Portal (Port 5173)</span>
+              <span>Client Portal</span>
             </span>
             <ExternalLink className="h-3.5 w-3.5 text-slate-500" />
           </a>

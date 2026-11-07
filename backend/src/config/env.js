@@ -20,7 +20,7 @@ export const env = {
   MONGODB_URI: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/travel_db',
   JWT_SECRET: process.env.JWT_SECRET || 'super_secure_travel_jwt_secret_key_change_in_production_9988',
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',
-  CLIENT_ORIGIN: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+  CLIENT_ORIGIN: process.env.CLIENT_ORIGIN || 'https://travel-booking-platform-u2vi.vercel.app',
   ADMIN_ORIGIN: process.env.ADMIN_ORIGIN || 'http://localhost:5174',
   AMADEUS_CLIENT_ID: process.env.AMADEUS_CLIENT_ID || '',
   AMADEUS_CLIENT_SECRET: process.env.AMADEUS_CLIENT_SECRET || '',
