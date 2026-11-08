@@ -28,4 +28,5 @@ export const env = {
   EXCHANGE_RATE_API_KEY: process.env.EXCHANGE_RATE_API_KEY || '',
   UNSPLASH_API_KEY: process.env.UNSPLASH_API_KEY || '',
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || 'sk_test_51MzTravelBookingGatewayLiveTestKey8821',
+  GEOAPIFY_API_KEY: process.env.GEOAPIFY_API_KEY || '7ce40ffb71cf4ca59ea23cc96d69bb67',
 };

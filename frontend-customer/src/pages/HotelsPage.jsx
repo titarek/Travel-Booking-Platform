@@ -16,7 +16,7 @@ export const HotelsPage = () => {
 
   const [hotels, setHotels] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [sort, setSort] = useState('rating');
+  const [sort, setSort] = useState(searchParams.get('sort') || 'rating');
   const [showMap, setShowMap] = useState(false);
 
   // Filters state
@@ -34,10 +34,19 @@ export const HotelsPage = () => {
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
 
   const city = searchParams.get('city') || "Cox's Bazar";
+  const lat = searchParams.get('lat') || '';
+  const lng = searchParams.get('lng') || '';
   const checkIn = searchParams.get('checkIn') || '';
   const checkOut = searchParams.get('checkOut') || '';
   const guests = searchParams.get('guests') || 2;
   const rooms = searchParams.get('rooms') || 1;
+
+  useEffect(() => {
+    const urlSort = searchParams.get('sort');
+    if (urlSort && urlSort !== sort) {
+      setSort(urlSort);
+    }
+  }, [searchParams, sort]);
 
   useEffect(() => {
     const fetchHotels = async () => {
@@ -45,6 +54,8 @@ export const HotelsPage = () => {
       try {
         const queryParams = new URLSearchParams({
           city,
+          ...(lat ? { lat } : {}),
+          ...(lng ? { lng } : {}),
           ...(filters.minRating ? { minRating: filters.minRating } : {}),
           ...(filters.freeCancellation ? { freeCancellation: 'true' } : {}),
           ...(filters.amenities ? { amenities: filters.amenities } : {}),
@@ -63,7 +74,7 @@ export const HotelsPage = () => {
     };
 
     fetchHotels();
-  }, [city, filters.minRating, filters.freeCancellation, filters.amenities, sort]);
+  }, [city, lat, lng, filters.minRating, filters.freeCancellation, filters.amenities, sort]);
 
   // Client-side filtering for price
   const filteredHotels = useMemo(() => hotels.filter((hotel) => {
@@ -98,6 +109,8 @@ export const HotelsPage = () => {
             compact
             initialValues={{
               city,
+              lat,
+              lng,
               checkIn,
               checkOut,
               guests,
@@ -143,10 +156,11 @@ export const HotelsPage = () => {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/80">
               <div>
                 <h2 className="text-base font-extrabold text-slate-900">
-                  Hotels in {city}
+                  {sort === 'distance' || (lat && lng) ? `Nearby Hotels around ${city}` : `Hotels in ${city}`}
                 </h2>
                 <p className="text-xs text-slate-500">
                   {filteredHotels.length} luxury & boutique {filteredHotels.length === 1 ? 'property' : 'properties'} found
+                  {(sort === 'distance' || (lat && lng)) && ' • Live Geoapify Nearby Radar'}
                   {checkIn && checkOut && ` • Stay dates: ${checkIn} to ${checkOut}`}
                 </p>
               </div>

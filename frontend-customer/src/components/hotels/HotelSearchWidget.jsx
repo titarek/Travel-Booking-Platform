@@ -13,9 +13,11 @@ import {
   Building2,
   Sparkles,
   Navigation,
+  Loader2,
 } from 'lucide-react';
 import { POPULAR_HOTEL_DESTINATIONS } from '../../utils/constants.js';
 import { Button } from '../ui/Button.jsx';
+import api from '../../api/axios.js';
 
 const getTodayStr = () => new Date().toISOString().split('T')[0];
 const getDaysLaterStr = (days) => new Date(Date.now() + 86400000 * days).toISOString().split('T')[0];
@@ -24,8 +26,13 @@ export const HotelSearchWidget = ({ initialValues = {}, onSearch }) => {
   const navigate = useNavigate();
 
   const [city, setCity] = useState(initialValues.city || "Cox's Bazar");
+  const [coords, setCoords] = useState(
+    initialValues.lat && initialValues.lng ? { lat: initialValues.lat, lng: initialValues.lng } : null,
+  );
   const [citySearchQuery, setCitySearchQuery] = useState('');
   const [cityOpen, setCityOpen] = useState(false);
+  const [liveSuggestions, setLiveSuggestions] = useState([]);
+  const [isLocating, setIsLocating] = useState(false);
 
   const [checkIn, setCheckIn] = useState(initialValues.checkIn || getDaysLaterStr(1));
   const [checkOut, setCheckOut] = useState(initialValues.checkOut || getDaysLaterStr(4));
@@ -42,17 +49,44 @@ export const HotelSearchWidget = ({ initialValues = {}, onSearch }) => {
   // Sync state if initialValues changes (e.g. from URL navigation)
   useEffect(() => {
     if (initialValues.city) setCity(initialValues.city);
+    if (initialValues.lat && initialValues.lng) {
+      setCoords({ lat: initialValues.lat, lng: initialValues.lng });
+    }
     if (initialValues.checkIn) setCheckIn(initialValues.checkIn);
     if (initialValues.checkOut) setCheckOut(initialValues.checkOut);
     if (initialValues.guests) setGuests(Number(initialValues.guests));
     if (initialValues.rooms) setRooms(Number(initialValues.rooms));
   }, [
     initialValues.city,
+    initialValues.lat,
+    initialValues.lng,
     initialValues.checkIn,
     initialValues.checkOut,
     initialValues.guests,
     initialValues.rooms,
   ]);
+
+  // Debounced live autocomplete via Geoapify API
+  useEffect(() => {
+    const trimmed = citySearchQuery.trim();
+    if (trimmed.length < 2) {
+      setLiveSuggestions([]);
+      return () => {};
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.get(`/hotels/autocomplete?q=${encodeURIComponent(trimmed)}`);
+        if (res.data?.data) {
+          setLiveSuggestions(res.data.data);
+        }
+      } catch {
+        setLiveSuggestions([]);
+      }
+    }, 280);
+
+    return () => clearTimeout(timer);
+  }, [citySearchQuery]);
 
   // Click outside to close dropdowns
   useEffect(() => {
@@ -108,6 +142,19 @@ export const HotelSearchWidget = ({ initialValues = {}, onSearch }) => {
 
   const handleSelectCity = (chosenCity) => {
     setCity(chosenCity);
+    setCoords(null);
+    setCitySearchQuery('');
+    setCityOpen(false);
+  };
+
+  const handleSelectSuggestion = (sug) => {
+    const selectedCity = sug.city || sug.formatted;
+    setCity(selectedCity);
+    if (sug.lat && sug.lng) {
+      setCoords({ lat: String(sug.lat), lng: String(sug.lng) });
+    } else {
+      setCoords(null);
+    }
     setCitySearchQuery('');
     setCityOpen(false);
   };
@@ -133,6 +180,7 @@ export const HotelSearchWidget = ({ initialValues = {}, onSearch }) => {
     e.preventDefault();
     const queryParams = new URLSearchParams({
       city: city.trim(),
+      ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
       checkIn,
       checkOut,
       guests: guests.toString(),
@@ -142,6 +190,7 @@ export const HotelSearchWidget = ({ initialValues = {}, onSearch }) => {
     if (onSearch) {
       onSearch({
         city: city.trim(),
+        ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
         checkIn,
         checkOut,
         guests,
@@ -153,38 +202,62 @@ export const HotelSearchWidget = ({ initialValues = {}, onSearch }) => {
   };
 
   const handleFindNearby = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const { latitude, longitude } = pos.coords;
-          if (onSearch) {
-            onSearch({
-              city,
-              lat: latitude.toFixed(4),
-              lng: longitude.toFixed(4),
-              sort: 'distance',
-              checkIn,
-              checkOut,
-              guests,
-              rooms,
-            });
-          } else {
-            navigate(`/hotels?city=${encodeURIComponent(city)}&lat=${latitude.toFixed(4)}&lng=${longitude.toFixed(4)}&sort=distance&checkIn=${checkIn}&checkOut=${checkOut}&guests=${guests}&rooms=${rooms}`);
-          }
-        },
-        () => {
-          if (onSearch) {
-            onSearch({ city, sort: 'distance', checkIn, checkOut, guests, rooms });
-          } else {
-            navigate(`/hotels?city=${encodeURIComponent(city)}&sort=distance&checkIn=${checkIn}&checkOut=${checkOut}&guests=${guests}&rooms=${rooms}`);
-          }
-        },
-      );
-    } else if (onSearch) {
-      onSearch({ city, sort: 'distance', checkIn, checkOut, guests, rooms });
-    } else {
-      navigate(`/hotels?city=${encodeURIComponent(city)}&sort=distance&checkIn=${checkIn}&checkOut=${checkOut}&guests=${guests}&rooms=${rooms}`);
+    if (!navigator.geolocation) {
+      if (onSearch) {
+        onSearch({ city, sort: 'distance', checkIn, checkOut, guests, rooms });
+      } else {
+        navigate(`/hotels?city=${encodeURIComponent(city)}&sort=distance&checkIn=${checkIn}&checkOut=${checkOut}&guests=${guests}&rooms=${rooms}`);
+      }
+      return;
     }
+
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        setIsLocating(false);
+        const { latitude, longitude } = pos.coords;
+        const latStr = latitude.toFixed(4);
+        const lngStr = longitude.toFixed(4);
+
+        let detectedCity = 'Current Location';
+        try {
+          const res = await api.get(`/hotels?lat=${latStr}&lng=${lngStr}&sort=distance`);
+          if (res.data?.location?.city) {
+            detectedCity = res.data.location.city;
+          }
+        } catch {
+          // fallback gracefully
+        }
+
+        setCity(detectedCity);
+        setCoords({ lat: latStr, lng: lngStr });
+
+        if (onSearch) {
+          onSearch({
+            city: detectedCity,
+            lat: latStr,
+            lng: lngStr,
+            sort: 'distance',
+            checkIn,
+            checkOut,
+            guests,
+            rooms,
+          });
+        } else {
+          navigate(`/hotels?city=${encodeURIComponent(detectedCity)}&lat=${latStr}&lng=${lngStr}&sort=distance&checkIn=${checkIn}&checkOut=${checkOut}&guests=${guests}&rooms=${rooms}`);
+        }
+      },
+      (err) => {
+        setIsLocating(false);
+        console.warn('Geolocation warning:', err.message);
+        if (onSearch) {
+          onSearch({ city, sort: 'distance', checkIn, checkOut, guests, rooms });
+        } else {
+          navigate(`/hotels?city=${encodeURIComponent(city)}&sort=distance&checkIn=${checkIn}&checkOut=${checkOut}&guests=${guests}&rooms=${rooms}`);
+        }
+      },
+      { timeout: 10000, enableHighAccuracy: true },
+    );
   };
 
   return (
@@ -257,8 +330,41 @@ export const HotelSearchWidget = ({ initialValues = {}, onSearch }) => {
                 )}
               </div>
 
+              {/* Live Geoapify Autocomplete Suggestions */}
+              {liveSuggestions.length > 0 && (
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-extrabold text-brand-600 tracking-wider block px-1 flex items-center justify-between">
+                    <span>Live Dynamic Suggestions</span>
+                    <span className="text-[9px] bg-brand-50 text-brand-600 px-1.5 py-0.5 rounded font-bold">Geoapify Radar</span>
+                  </span>
+                  <div className="space-y-1">
+                    {liveSuggestions.map((sug) => (
+                      <button
+                        key={`${sug.formatted}_${sug.lat || ''}`}
+                        type="button"
+                        onClick={() => handleSelectSuggestion(sug)}
+                        className="w-full flex items-center justify-between p-2 rounded-xl text-left hover:bg-brand-50/70 text-slate-800 transition-colors group"
+                      >
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <MapPin className="h-4 w-4 shrink-0 text-brand-500 group-hover:scale-110 transition-transform" />
+                          <div className="overflow-hidden">
+                            <span className="block text-xs font-bold truncate text-slate-900">{sug.city}</span>
+                            <span className="block text-[10px] truncate text-slate-500">{sug.formatted}</span>
+                          </div>
+                        </div>
+                        {sug.country && (
+                          <span className="text-[9px] px-2 py-0.5 rounded-full shrink-0 font-bold bg-slate-100 text-slate-600">
+                            {sug.country}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Custom input quick action if typed text */}
-              {citySearchQuery.trim().length > 0 && (
+              {citySearchQuery.trim().length > 0 && liveSuggestions.length === 0 && (
                 <button
                   type="button"
                   onClick={handleCustomCitySubmit}
@@ -506,11 +612,16 @@ export const HotelSearchWidget = ({ initialValues = {}, onSearch }) => {
           </span>
           <button
             type="button"
+            disabled={isLocating}
             onClick={handleFindNearby}
-            className="px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/70 flex items-center gap-1"
+            className="px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/70 flex items-center gap-1 disabled:opacity-60"
           >
-            <Navigation className="h-3 w-3 text-emerald-600" />
-            <span>Nearby / Near Me</span>
+            {isLocating ? (
+              <Loader2 className="h-3 w-3 text-emerald-600 animate-spin" />
+            ) : (
+              <Navigation className="h-3 w-3 text-emerald-600" />
+            )}
+            <span>{isLocating ? 'Locating...' : 'Nearby / Near Me'}</span>
           </button>
           {['Cox’s Bazar', 'Dubai', 'Tokyo', 'Paris', 'Rome', 'Bali'].map((qCity) => (
             <button

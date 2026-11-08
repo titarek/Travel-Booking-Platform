@@ -3,6 +3,13 @@ import { Hotel } from '../models/hotel.model.js';
 import { memoryStore } from '../utils/memoryStore.js';
 import { findAirport } from '../utils/amadeus.js';
 import { getUnsplashPhoto } from '../utils/unsplash.js';
+import {
+  geocodeWithGeoapify,
+  reverseGeocodeWithGeoapify,
+  fetchNearbyHotelsFromGeoapify,
+  getCachedGeoHotel,
+  autocompleteWithGeoapify,
+} from '../utils/geoapify.js';
 
 /**
  * City geo-coordinates directory for accurate real-world locations
@@ -248,6 +255,44 @@ const generateDynamicHotels = async (cityName) => {
 };
 
 /**
+ * Filter and sort hotels in memory
+ */
+const filterAndSortHotels = (hotelsList, filters, sort) => {
+  let list = [...hotelsList];
+  if (filters.minRating) {
+    list = list.filter((h) => (h.reviewScore || 0) >= Number(filters.minRating));
+  }
+  if (filters.maxPrice) {
+    list = list.filter((h) => (h.pricePerNight || 0) <= Number(filters.maxPrice));
+  }
+  if (filters.freeCancellation === 'true') {
+    list = list.filter((h) => h.freeCancellation);
+  }
+  if (filters.featured === 'true') {
+    list = list.filter((h) => h.featured);
+  }
+  if (filters.amenities) {
+    const requested = filters.amenities.split(',').map((a) => a.trim().toLowerCase());
+    list = list.filter((h) => {
+      const hotelAmenities = (h.amenities || []).map((a) => a.toLowerCase());
+      return requested.every((r) => hotelAmenities.some((ha) => ha.includes(r)));
+    });
+  }
+
+  if (sort === 'distance') {
+    list.sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
+  } else if (sort === 'price_asc') {
+    list.sort((a, b) => (a.pricePerNight || 0) - (b.pricePerNight || 0));
+  } else if (sort === 'price_desc') {
+    list.sort((a, b) => (b.pricePerNight || 0) - (a.pricePerNight || 0));
+  } else {
+    list.sort((a, b) => (b.reviewScore || 0) - (a.reviewScore || 0));
+  }
+
+  return list;
+};
+
+/**
  * Get all hotels with filtering by city, nearby radius, rating, price, amenities
  */
 export const getHotels = async (req, res, next) => {
@@ -263,15 +308,75 @@ export const getHotels = async (req, res, next) => {
       featured,
       sort,
     } = req.query;
-    const isDbConnected = mongoose.connection.readyState === 1;
 
-    // Determine reference center coordinates for distance calculation
+    const filters = {
+      minRating,
+      maxPrice,
+      amenities,
+      freeCancellation,
+      featured,
+    };
+
+    // 1. If explicit GPS coordinates or nearby search requested, query Geoapify Places
+    if (lat && lng) {
+      const numLat = parseFloat(lat);
+      const numLng = parseFloat(lng);
+      if (!Number.isNaN(numLat) && !Number.isNaN(numLng)) {
+        let detectedCity = city;
+        if (!detectedCity || detectedCity.toLowerCase() === 'nearby' || detectedCity.toLowerCase() === 'near me') {
+          const rev = await reverseGeocodeWithGeoapify(numLat, numLng);
+          detectedCity = rev?.city || 'Local Area';
+        }
+
+        const geoHotels = await fetchNearbyHotelsFromGeoapify(numLat, numLng, detectedCity, 30000, 20);
+        if (geoHotels && geoHotels.length > 0) {
+          const processed = filterAndSortHotels(geoHotels, filters, sort);
+          return res.status(200).json({
+            success: true,
+            count: processed.length,
+            source: 'geoapify',
+            location: { lat: numLat, lng: numLng, city: detectedCity },
+            data: processed,
+          });
+        }
+      }
+    }
+
+    // 2. If a destination / city is entered, geocode with Geoapify and find nearby hotels
+    if (city && city.trim()) {
+      const cleanCity = city.trim();
+      const geocoded = await geocodeWithGeoapify(cleanCity);
+      if (geocoded && geocoded.lat && geocoded.lon) {
+        const geoHotels = await fetchNearbyHotelsFromGeoapify(
+          geocoded.lat,
+          geocoded.lon,
+          geocoded.city || cleanCity,
+          30000,
+          20,
+        );
+
+        if (geoHotels && geoHotels.length > 0) {
+          const processed = filterAndSortHotels(geoHotels, filters, sort);
+          return res.status(200).json({
+            success: true,
+            count: processed.length,
+            source: 'geoapify',
+            location: { lat: geocoded.lat, lng: geocoded.lon, city: geocoded.city },
+            data: processed,
+          });
+        }
+      }
+    }
+
+    // 3. Fallback to Database / Memory Catalog
     let centerGeo = null;
     if (lat && lng) {
       centerGeo = { lat: parseFloat(lat), lng: parseFloat(lng) };
     } else if (city) {
       centerGeo = await getCityGeoCoordinates(city);
     }
+
+    const isDbConnected = mongoose.connection.readyState === 1;
 
     if (isDbConnected) {
       const filter = {};
@@ -398,11 +503,17 @@ export const getFeaturedHotels = async (req, res, next) => {
  */
 export const getHotelById = async (req, res, next) => {
   try {
-    let hotel;
-    if (mongoose.connection.readyState === 1) {
-      hotel = await Hotel.findById(req.params.id);
-    } else {
-      hotel = memoryStore.hotels.find((h) => h._id.toString() === req.params.id);
+    const { id } = req.params;
+    let hotel = getCachedGeoHotel(id);
+
+    if (!hotel && mongoose.connection.readyState === 1) {
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        hotel = await Hotel.findById(id);
+      }
+    }
+
+    if (!hotel) {
+      hotel = memoryStore.hotels.find((h) => (h._id && h._id.toString() === id) || h.id === id);
     }
 
     if (!hotel) {
@@ -410,6 +521,22 @@ export const getHotelById = async (req, res, next) => {
     }
 
     return res.status(200).json({ success: true, data: hotel });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Autocomplete location text for hotel search suggestions
+ */
+export const getHotelAutocomplete = async (req, res, next) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.trim().length < 2) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+    const suggestions = await autocompleteWithGeoapify(q, 6);
+    return res.status(200).json({ success: true, data: suggestions });
   } catch (error) {
     return next(error);
   }
