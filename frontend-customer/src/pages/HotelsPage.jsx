@@ -152,7 +152,7 @@ export const HotelsPage = () => {
           </div>
 
           {/* Right: Results Listing + Optional Map View */}
-          <div className="lg:col-span-3 space-y-4">
+          <div className="lg:col-span-3 space-y-4 min-w-0">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/80">
               <div>
                 <h2 className="text-base font-extrabold text-slate-900">

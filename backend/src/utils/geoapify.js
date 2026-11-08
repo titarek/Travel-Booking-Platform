@@ -238,7 +238,7 @@ export const fetchNearbyHotelsFromGeoapify = async (lat, lon, cityName, radiusMe
             breakfastIncluded: true,
           },
         ],
-        description: `Verified accommodations on Geoapify Live Radar located at ${p.formatted || hotelName}. Situated ${distKm} km from the requested location.`,
+        description: `Verified accommodations on Geoapify Live Radar located in ${p.city || cityName || 'destination'}. Situated ${distKm} km from center with premium guest amenities.`,
         freeCancellation: true,
         featured: idx === 0,
         source: 'geoapify',
