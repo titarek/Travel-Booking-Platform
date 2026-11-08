@@ -117,6 +117,33 @@ export const reverseGeocodeWithGeoapify = async (lat, lon) => {
   }
 };
 
+// Strict exclusion for non-hotel establishments (hostels, student halls, dorms, paying guests)
+const EXCLUDED_PATTERNS = [
+  '\\b(hostel|hostels|dormitory|dorms?|mess|pg\\b|paying\\s*guest)\\b',
+  '\\b(girls?\\s*hall|boys?\\s*hall|college|school|colony)\\b',
+].join('|');
+const EXCLUDED_HOTEL_REGEX = new RegExp(EXCLUDED_PATTERNS, 'i');
+
+// Keywords that indicate legitimate bookable commercial hotels and resorts
+const VALID_PATTERNS = [
+  '\\b(hotels?|h[oô]tels?|resorts?|motels?|inns?|suites?|lodges?)\\b',
+  '\\b(palaces?|villas?|ch[aâ]teaux?|cottages?|b&b|bed\\s*(and|&)\\s*breakfast)\\b',
+  '(হোটেল|রিসোর্ট|মোটেল|ইন)',
+  '(best\\s*western|marriott|hilton|hyatt|radisson|sheraton)',
+  '(westin|novotel|intercontinental|four\\s*seasons|le\\s*meridien)',
+].join('|');
+const VALID_HOTEL_REGEX = new RegExp(VALID_PATTERNS, 'i');
+
+/**
+ * Filter out college/girls/student hostels, dormitories, and unbookable entities
+ */
+export const isValidHotelTitle = (name) => {
+  if (!name || name.trim().toLowerCase() === 'undefined') return false;
+  const clean = name.trim();
+  if (EXCLUDED_HOTEL_REGEX.test(clean)) return false;
+  return VALID_HOTEL_REGEX.test(clean);
+};
+
 /**
  * Fetch live nearby hotels from Geoapify Places API around coordinates
  */
@@ -132,7 +159,8 @@ export const fetchNearbyHotelsFromGeoapify = async (lat, lon, cityName, radiusMe
   }
 
   const apiKey = env.GEOAPIFY_API_KEY || '7ce40ffb71cf4ca59ea23cc96d69bb67';
-  const url = `${GEOAPIFY_BASE}/v2/places?categories=accommodation.hotel,accommodation&filter=circle:${numLon},${numLat},${radiusMeters}&bias=proximity:${numLon},${numLat}&limit=${limit}&apiKey=${apiKey}`;
+  const fetchLimit = Math.max(limit * 2, 40);
+  const url = `${GEOAPIFY_BASE}/v2/places?categories=accommodation.hotel,accommodation.motel&filter=circle:${numLon},${numLat},${radiusMeters}&bias=proximity:${numLon},${numLat}&limit=${fetchLimit}&apiKey=${apiKey}`;
 
   try {
     const res = await fetch(url);
@@ -140,18 +168,25 @@ export const fetchNearbyHotelsFromGeoapify = async (lat, lon, cityName, radiusMe
     const data = await res.json();
     if (!data.features || data.features.length === 0) return [];
 
-    const mappedHotels = data.features.map((feature, idx) => {
+    const validFeatures = data.features.filter((feature) => {
+      const p = feature.properties;
+      if (!p || !p.name) return false;
+      const cats = p.categories || [];
+      const hasExcludedCategory = cats.some(
+        (c) => c.includes('hostel') || c.includes('dormitory') || c.includes('apartment'),
+      );
+      if (hasExcludedCategory) return false;
+      return isValidHotelTitle(p.name);
+    });
+
+    const mappedHotels = validFeatures.slice(0, limit).map((feature, idx) => {
       const p = feature.properties;
       const hotelLat = p.lat;
       const hotelLng = p.lon;
       const distKm = calculateDistanceKm(numLat, numLon, hotelLat, hotelLng);
 
       // Clean and sanitize hotel name
-      let hotelName = (p.name || '').trim();
-      if (!hotelName) {
-        const street = p.street || p.address_line1 || '';
-        hotelName = street ? `${street} Boutique Hotel` : `Grand View Hotel ${cityName || ''}`;
-      }
+      const hotelName = (p.name || '').trim();
 
       // Generate deterministic pricing & review scores
       const baseHash = Math.abs(hotelName.split('').reduce((acc, c) => acc + c.charCodeAt(0), idx * 17));

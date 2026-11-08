@@ -9,6 +9,7 @@ import {
   fetchNearbyHotelsFromGeoapify,
   getCachedGeoHotel,
   autocompleteWithGeoapify,
+  isValidHotelTitle,
 } from '../utils/geoapify.js';
 
 /**
@@ -258,7 +259,7 @@ const generateDynamicHotels = async (cityName) => {
  * Filter and sort hotels in memory
  */
 const filterAndSortHotels = (hotelsList, filters, sort) => {
-  let list = [...hotelsList];
+  let list = hotelsList.filter((h) => isValidHotelTitle(h.name));
   if (filters.minRating) {
     list = list.filter((h) => (h.reviewScore || 0) >= Number(filters.minRating));
   }
