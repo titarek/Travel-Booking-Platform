@@ -3,12 +3,27 @@ import { env } from './src/config/env.js';
 import { connectDB } from './src/config/db.js';
 
 const startServer = async () => {
-  // Connect to MongoDB
+  const serverStartTime = Date.now();
+  const startIso = new Date().toISOString();
+
+  console.log('\n============================================================');
+  console.log(`[Startup] Server starting at ${startIso}`);
+  console.log(`[Startup] Environment: ${env.NODE_ENV} | Target Port: ${env.PORT}`);
+  console.log('============================================================');
+
+  // Connect to PostgreSQL database
+  const dbStartTime = Date.now();
   await connectDB();
+  const dbDurationMs = Date.now() - dbStartTime;
+  console.log(`[Startup] Database connected in ${dbDurationMs}ms at ${new Date().toISOString()}`);
 
   const server = app.listen(env.PORT, () => {
-    console.log(`✓ Travel API server running in ${env.NODE_ENV} mode on http://localhost:${env.PORT}`);
-    console.log(`✓ Allowed CORS origin: ${env.CLIENT_ORIGIN}\n`);
+    const totalWakeupMs = Date.now() - serverStartTime;
+    console.log('============================================================');
+    console.log(`✓ [Startup] Server ready in ${totalWakeupMs}ms at ${new Date().toISOString()}`);
+    console.log(`✓ [Health] Keep-alive endpoint: http://localhost:${env.PORT}/health`);
+    console.log(`✓ [CORS] Whitelisted origins: ${env.CLIENT_ORIGIN}, ${env.ADMIN_ORIGIN}, *.vercel.app`);
+    console.log('============================================================\n');
   });
 
   server.on('error', (err) => {

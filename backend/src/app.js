@@ -53,13 +53,22 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 // Sanitize query and body inputs against NoSQL injection
 app.use(mongoSanitize());
 
-// Global rate limiting to guard public endpoints
-app.use('/api', generalLimiter);
+// Lightweight health check endpoint for keep-alive monitoring & Render cold start prevention
+// Requires no authentication, minimal processing, returns 200 OK instantly
+const healthCheckHandler = (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  });
+};
 
-// Server health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
-});
+app.get('/health', healthCheckHandler);
+app.head('/health', (req, res) => res.status(200).end());
+app.get('/api/health', healthCheckHandler);
+app.head('/api/health', (req, res) => res.status(200).end());
+
+// Global rate limiting to guard public endpoints (bypassed by /health)
+app.use('/api', generalLimiter);
 
 // Primary application API routes
 app.use('/api/auth', authRoutes);
