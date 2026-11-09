@@ -33,6 +33,7 @@ import {
   LogOut,
   ExternalLink,
   XCircle,
+  MapPin,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
@@ -2001,6 +2002,7 @@ export const AdminPage = () => {
                             {service.id === 'mongodb' && <Database className="h-6 w-6 text-emerald-600" />}
                             {service.id === 'jwt' && <ShieldCheck className="h-6 w-6 text-purple-600" />}
                             {service.id === 'stripe' && <CreditCard className="h-6 w-6 text-indigo-600" />}
+                            {service.id === 'geoapify' && <MapPin className="h-6 w-6 text-emerald-600" />}
                           </div>
                           <div>
                             <h3 className="text-sm font-black text-slate-900">{service.name}</h3>

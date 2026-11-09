@@ -1679,6 +1679,18 @@ export const getApiKeysStatus = async (req, res, next) => {
         lastPing: 'Operational (Simulated/Live)',
         docsUrl: 'https://stripe.com',
       },
+      {
+        id: 'geoapify',
+        name: 'Geoapify Geocoding & Places Radar API',
+        envVar: 'GEOAPIFY_API_KEY',
+        category: 'Live Hotel Places & Geocoding',
+        status: (env.GEOAPIFY_API_KEY || process.env.GEOAPIFY_API_KEY) ? 'connected' : 'fallback',
+        maskedKey: maskKey(env.GEOAPIFY_API_KEY || process.env.GEOAPIFY_API_KEY || '7ce40ffb71cf4ca59ea23cc96d69bb67'),
+        quota: '3,000 requests/day (Free Tier)',
+        caching: '15-minute in-memory smart TTL active',
+        lastPing: 'Operational',
+        docsUrl: 'https://www.geoapify.com',
+      },
     ];
 
     return res.status(200).json({
@@ -1731,6 +1743,9 @@ export const revealApiKey = async (req, res, next) => {
     } else if (service === 'stripe') {
       serviceLabel = 'Stripe Payment Gateway API';
       fullKey = process.env.STRIPE_SECRET_KEY || env.STRIPE_SECRET_KEY || 'sk_test_51MzTravelBookingGatewayLiveTestKey8821';
+    } else if (service === 'geoapify') {
+      serviceLabel = 'Geoapify Geocoding & Places Radar API';
+      fullKey = env.GEOAPIFY_API_KEY || process.env.GEOAPIFY_API_KEY || '7ce40ffb71cf4ca59ea23cc96d69bb67';
     } else {
       return res.status(400).json({
         success: false,
@@ -1826,6 +1841,11 @@ export const updateApiKey = async (req, res, next) => {
       serviceLabel = 'Stripe Secret Key';
       env.STRIPE_SECRET_KEY = trimmedKey;
       process.env.STRIPE_SECRET_KEY = trimmedKey;
+    } else if (service === 'geoapify') {
+      envVarName = 'GEOAPIFY_API_KEY';
+      serviceLabel = 'Geoapify Geocoding & Places API';
+      env.GEOAPIFY_API_KEY = trimmedKey;
+      process.env.GEOAPIFY_API_KEY = trimmedKey;
     } else {
       return res.status(400).json({
         success: false,
@@ -2033,6 +2053,27 @@ export const testApiConnection = async (req, res, next) => {
         status: 'Operational (Sandbox)',
         message: 'Stripe Payment Gateway ready for test checkout intents and automated invoicing.',
       });
+    }
+
+    if (service === 'geoapify') {
+      const apiKey = env.GEOAPIFY_API_KEY || process.env.GEOAPIFY_API_KEY || '7ce40ffb71cf4ca59ea23cc96d69bb67';
+      try {
+        const response = await fetch(`https://api.geoapify.com/v1/geocode/search?text=Dhaka&apiKey=${apiKey}&limit=1`);
+        const latencyMs = Date.now() - start;
+        return res.status(200).json({
+          success: response.ok,
+          latencyMs,
+          status: response.ok ? 'Operational (200 OK)' : `HTTP ${response.status}`,
+          message: response.ok ? 'Geoapify Geocoding & Places Radar endpoint reachable.' : 'Geoapify returned an error response.',
+        });
+      } catch (err) {
+        return res.status(200).json({
+          success: false,
+          latencyMs: Date.now() - start,
+          status: 'Connection Failed',
+          message: err.message,
+        });
+      }
     }
 
     return res.status(200).json({

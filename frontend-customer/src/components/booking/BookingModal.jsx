@@ -14,6 +14,7 @@ import { Input } from '../ui/Input.jsx';
 import { Button } from '../ui/Button.jsx';
 import { Badge } from '../ui/Badge.jsx';
 import { ETicketModal } from './ETicketModal.jsx';
+import { FlightRadarMap } from '../flights/FlightRadarMap.jsx';
 import api from '../../api/axios.js';
 
 export const BookingModal = ({
@@ -178,6 +179,25 @@ export const BookingModal = ({
             <span className="text-[10px] text-slate-400 block">Total Payable</span>
           </div>
         </div>
+
+        {/* Live Flight Radar Map for Flight Bookings */}
+        {type === 'flight' && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                Live Radar Route & Aircraft Telemetry
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono font-semibold">
+                {item.flightNumber || 'FLIGHT'}
+              </span>
+            </div>
+            <FlightRadarMap
+              flight={item}
+              className="h-44 sm:h-52 w-full rounded-2xl border border-slate-200/90 shadow-inner overflow-hidden"
+            />
+          </div>
+        )}
 
         {/* STEP 1: Traveler Details */}
         {step === 1 && (

@@ -20,6 +20,7 @@ import { formatCurrency } from '../../utils/formatters.js';
 import { Button } from '../ui/Button.jsx';
 import { Badge } from '../ui/Badge.jsx';
 import api from '../../api/axios.js';
+import { FlightRadarMap } from './FlightRadarMap.jsx';
 
 export const SelectedFlightStatus = ({ flight, onProceedToBook, onClose }) => {
   const { currency, exchangeRates } = useAuth();
@@ -101,7 +102,6 @@ export const SelectedFlightStatus = ({ flight, onProceedToBook, onClose }) => {
   if (!flight) return null;
 
   const currentStatus = statusData?.status || flight.status || 'Scheduled';
-  const isLanded = currentStatus.toLowerCase() === 'landed';
   const isInFlight = currentStatus.toLowerCase().includes('flight') || currentStatus.toLowerCase() === 'active';
   const isDelayed = currentStatus.toLowerCase() === 'delayed';
 
@@ -169,12 +169,12 @@ export const SelectedFlightStatus = ({ flight, onProceedToBook, onClose }) => {
         </div>
       ) : (
         <div className="space-y-6 relative z-10">
-          {/* 2. Route & Progress Visualizer */}
-          <div className="bg-slate-50/90 rounded-2xl p-5 sm:p-6 border border-slate-200/80 space-y-4">
-            <div className="flex items-start justify-between gap-4">
+          {/* 2. Live Interactive Route & Great-Circle Radar Map */}
+          <div className="bg-slate-50/90 rounded-2xl p-4 sm:p-5 border border-slate-200/80 space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-1">
               {/* Origin Departure */}
-              <div className="text-left space-y-1 max-w-[200px]">
-                <div className="flex items-baseline gap-2">
+              <div className="text-left space-y-1 max-w-[280px]">
+                <div className="flex items-center gap-2">
                   <span className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 block">
                     {statusData?.origin || flight.origin.code}
                   </span>
@@ -183,6 +183,9 @@ export const SelectedFlightStatus = ({ flight, onProceedToBook, onClose }) => {
                       {statusData.originIcao}
                     </span>
                   )}
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    Departure
+                  </span>
                 </div>
                 <span className="text-xs font-bold text-slate-800 block truncate">
                   {statusData?.originCity || flight.origin.city}
@@ -190,7 +193,7 @@ export const SelectedFlightStatus = ({ flight, onProceedToBook, onClose }) => {
                 <span className="text-[11px] text-slate-500 block truncate" title={statusData?.originAirport || flight.origin.airport}>
                   {statusData?.originAirport || flight.origin.airport}
                 </span>
-                <div className="pt-2 space-y-1 text-[11px]">
+                <div className="pt-1 space-y-0.5 text-[11px]">
                   <div className="text-slate-600 flex items-center gap-1.5 font-medium">
                     <Clock className="h-3 w-3 text-brand-500 shrink-0" />
                     <span>Sched: <strong className="text-slate-800">{statusData?.scheduledDep || flight.departureTime}</strong></span>
@@ -211,47 +214,31 @@ export const SelectedFlightStatus = ({ flight, onProceedToBook, onClose }) => {
                 </div>
               </div>
 
-              {/* Progress Line */}
-              <div className="flex-1 px-4 sm:px-8 text-center space-y-2 pt-2">
-                <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                  <span className="truncate max-w-[80px]">{statusData?.originTimezone || 'Origin'}</span>
-                  <span className="text-brand-600 flex items-center gap-1 font-bold">
-                    <Compass className="h-3.5 w-3.5" /> {flight.duration}
-                  </span>
-                  <span className="truncate max-w-[80px]">{statusData?.destinationTimezone || 'Dest'}</span>
-                </div>
-
-                <div className="relative w-full py-2">
-                  <div className="h-2 w-full bg-slate-200/90 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-brand-500 via-sky-400 to-emerald-500 rounded-full transition-all duration-700"
-                      style={{ width: `${isLanded ? 100 : statusData?.progressPercent || 50}%` }}
-                    />
-                  </div>
-                  <div
-                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 bg-brand-600 text-white p-1.5 rounded-full shadow-md shadow-brand-500/30 transition-all duration-700"
-                    style={{ left: `${isLanded ? 98 : statusData?.progressPercent || 50}%` }}
-                  >
-                    <Plane className="h-3.5 w-3.5 rotate-90" />
-                  </div>
-                </div>
-
-                <span className="text-[10px] text-slate-500 block font-mono font-semibold">
-                  {flight.stops === 0 ? 'Direct Non-Stop Flight' : `${flight.stops} Stopover Connection`}
+              {/* Middle Route Tag */}
+              <div className="hidden sm:flex flex-col items-center gap-1 px-4 text-center">
+                <span className="text-xs font-black text-brand-700 bg-brand-50 px-3 py-1 rounded-full border border-brand-200 flex items-center gap-1.5">
+                  <Compass className="h-3.5 w-3.5 text-brand-600" />
+                  {flight.duration}
+                </span>
+                <span className="text-[10px] font-mono text-slate-500">
+                  {flight.stops === 0 ? 'Direct Non-Stop' : `${flight.stops} Stop Transit`}
                 </span>
               </div>
 
               {/* Destination Arrival */}
-              <div className="text-right space-y-1 max-w-[200px]">
-                <div className="flex items-baseline justify-end gap-2">
-                  <span className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 block">
-                    {statusData?.destination || flight.destination.code}
+              <div className="text-left sm:text-right space-y-1 max-w-[280px]">
+                <div className="flex items-center sm:justify-end gap-2">
+                  <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-200">
+                    Final Location
                   </span>
                   {statusData?.destinationIcao && (
                     <span className="text-[10px] font-mono text-brand-700 font-bold bg-brand-50 px-1.5 py-0.5 rounded border border-brand-200/60">
                       {statusData.destinationIcao}
                     </span>
                   )}
+                  <span className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 block">
+                    {statusData?.destination || flight.destination.code}
+                  </span>
                 </div>
                 <span className="text-xs font-bold text-slate-800 block truncate">
                   {statusData?.destinationCity || flight.destination.city}
@@ -259,14 +246,14 @@ export const SelectedFlightStatus = ({ flight, onProceedToBook, onClose }) => {
                 <span className="text-[11px] text-slate-500 block truncate" title={statusData?.destinationAirport || flight.destination.airport}>
                   {statusData?.destinationAirport || flight.destination.airport}
                 </span>
-                <div className="pt-2 space-y-1 text-[11px]">
-                  <div className="text-slate-600 flex items-center justify-end gap-1.5 font-medium">
+                <div className="pt-1 space-y-0.5 text-[11px]">
+                  <div className="text-slate-600 flex items-center sm:justify-end gap-1.5 font-medium">
                     <Clock className="h-3 w-3 text-emerald-600 shrink-0" />
-                    <span>Sched: <strong className="text-slate-800">{statusData?.scheduledArr || flight.arrivalTime}</strong></span>
+                    <span>Est: <strong className="text-slate-800">{statusData?.scheduledArr || flight.arrivalTime}</strong></span>
                   </div>
                   {statusData?.arrRunway && (
                     <div className="text-emerald-700 font-mono text-[10px] font-semibold">
-                      Est. Touchdown: {statusData.arrRunway}
+                      Touchdown: {statusData.arrRunway}
                     </div>
                   )}
                   {statusData?.arrivalDelay && (
@@ -280,6 +267,13 @@ export const SelectedFlightStatus = ({ flight, onProceedToBook, onClose }) => {
                 </div>
               </div>
             </div>
+
+            {/* Live Interactive Flight Radar Map */}
+            <FlightRadarMap
+              flight={flight}
+              statusData={statusData}
+              height="h-64 sm:h-72"
+            />
           </div>
 
           {/* 3. Comprehensive Flight Attributes Grid (All API Parameters) */}

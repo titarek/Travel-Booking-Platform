@@ -6,6 +6,7 @@ import { Modal } from '../ui/Modal.jsx';
 import { Button } from '../ui/Button.jsx';
 import { Badge } from '../ui/Badge.jsx';
 import { SeatMapModal } from '../features/SeatMapModal.jsx';
+import { FlightRadarMap } from './FlightRadarMap.jsx';
 
 export const FlightDetailModal = ({ flight, isOpen, onClose, onBook }) => {
   const { currency, exchangeRates } = useAuth();
@@ -42,49 +43,26 @@ export const FlightDetailModal = ({ flight, isOpen, onClose, onBook }) => {
             </Badge>
           </div>
 
-          {/* Flight Route Timeline */}
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-            <div className="flex items-center justify-between text-xs text-slate-500 mb-3 font-semibold">
-              <span>Departure: {formatDate(flight.departureTime)}</span>
-              <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> Total Flight Time: {flight.duration}</span>
+          {/* Live Flight Route & Radar Map */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs text-slate-500 font-semibold px-1">
+              <span>Departure: {formatDate(flight.departureTime)} ({flight.origin.code} &rarr; {flight.destination.code})</span>
+              <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5 text-brand-500" /> Total Flight Time: {flight.duration}</span>
             </div>
-
-            <div className="relative pl-6 space-y-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-brand-300">
-              {/* Origin Node */}
-              <div className="relative">
-                <div className="absolute -left-[22px] top-1 h-3.5 w-3.5 rounded-full bg-brand-500 border-2 border-white" />
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-base font-extrabold text-slate-900 leading-tight">
-                      {formatTime(flight.departureTime)}
-                    </p>
-                    <p className="text-xs font-bold text-slate-700">{flight.origin.city} ({flight.origin.code})</p>
-                    <p className="text-[11px] text-slate-400">{flight.origin.airport}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Stopover notice if any */}
-              {flight.stops > 0 && (
-                <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-800">
-                  Transit Stop: {flight.stopoverCities?.join(', ') || 'Intermediate Airport'} • Layover duration approx. 1h 45m
-                </div>
-              )}
-
-              {/* Destination Node */}
-              <div className="relative">
-                <div className="absolute -left-[22px] top-1 h-3.5 w-3.5 rounded-full bg-emerald-500 border-2 border-white" />
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-base font-extrabold text-slate-900 leading-tight">
-                      {formatTime(flight.arrivalTime)}
-                    </p>
-                    <p className="text-xs font-bold text-slate-700">{flight.destination.city} ({flight.destination.code})</p>
-                    <p className="text-[11px] text-slate-400">{flight.destination.airport}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <FlightRadarMap
+              flight={flight}
+              statusData={{
+                origin: flight.origin.code,
+                originCity: flight.origin.city,
+                destination: flight.destination.code,
+                destinationCity: flight.destination.city,
+                flightNumber: flight.flightNumber,
+                scheduledDep: formatTime(flight.departureTime),
+                scheduledArr: formatTime(flight.arrivalTime),
+                status: flight.status || 'In Flight',
+              }}
+              height="h-56 sm:h-64"
+            />
           </div>
 
           {/* Baggage & Fare Inclusions + Seat Map Teaser */}
