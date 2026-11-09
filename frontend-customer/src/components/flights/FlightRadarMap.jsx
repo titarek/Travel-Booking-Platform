@@ -329,10 +329,10 @@ export const FlightRadarMap = ({
         </Marker>
       </MapContainer>
 
-      {/* Floating HUD Telemetry Pill (Google Maps Style Top Overlay) */}
-      <div className="absolute top-3 left-3 z-[1000] pointer-events-none flex items-center gap-2">
-        <div className="bg-slate-900/90 backdrop-blur-md text-white px-3 py-1.5 rounded-xl border border-white/10 shadow-lg flex items-center gap-2 text-xs">
-          <Radio className="h-3.5 w-3.5 text-emerald-400 animate-pulse" />
+      {/* Floating HUD Telemetry Pill (Centered at Top to avoid covering zoom controls) */}
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none flex items-center justify-center">
+        <div className="bg-slate-900/90 backdrop-blur-md text-white px-3 py-1.5 rounded-xl border border-white/10 shadow-lg flex items-center gap-2 text-xs whitespace-nowrap">
+          <Radio className="h-3.5 w-3.5 text-emerald-400 animate-pulse shrink-0" />
           <span className="font-bold text-white text-[11px]">
             GPS: <span className="font-mono text-emerald-300">{currentAircraft.lat.toFixed(2)}°, {currentAircraft.lng.toFixed(2)}°</span>
           </span>
