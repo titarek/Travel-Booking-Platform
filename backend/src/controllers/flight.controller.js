@@ -5,52 +5,46 @@ import { findAirport } from '../utils/amadeus.js';
 import { trackFlightStatus, getLiveRouteFlights } from '../utils/aviationstack.js';
 
 /**
- * Helper to dynamically generate realistic flights for an unseeded city route
+ * Helper to calculate flight duration from departure & arrival timestamps
  */
-const generateDynamicFlights = (originAirport, destAirport, departureDate) => {
-  const baseDepTime = departureDate ? new Date(departureDate) : new Date(Date.now() + 86400000 * 2);
-  baseDepTime.setHours(9, 30, 0, 0);
-
-  const airlines = [
-    { name: 'Emirates', code: 'EK', prefix: 'EK-', basePrice: 480, duration: '6h 30m' },
-    { name: 'Qatar Airways', code: 'QR', prefix: 'QR-', basePrice: 460, duration: '6h 15m' },
-    { name: 'Singapore Airlines', code: 'SQ', prefix: 'SQ-', basePrice: 510, duration: '5h 45m' },
-    { name: 'Biman Bangladesh Airlines', code: 'BG', prefix: 'BG-', basePrice: 380, duration: '5h 30m' },
-  ];
-
-  return airlines.map((a, idx) => {
-    const dep = new Date(baseDepTime.getTime() + idx * 4 * 3600000);
-    const arr = new Date(dep.getTime() + 6 * 3600000);
-    return {
-      airline: a.name,
-      airlineCode: a.code,
-      flightNumber: `${a.prefix}${Math.floor(100 + Math.random() * 899)}`,
-      origin: {
-        code: originAirport.code,
-        city: originAirport.city,
-        airport: originAirport.airport,
-      },
-      destination: {
-        code: destAirport.code,
-        city: destAirport.city,
-        airport: destAirport.airport,
-      },
-      departureTime: dep,
-      arrivalTime: arr,
-      duration: a.duration,
-      stops: idx % 2 === 0 ? 0 : 1,
-      stopoverCities: idx % 2 === 0 ? [] : ['Dubai / Doha Transit'],
-      cabinClass: 'Economy',
-      price: a.basePrice + Math.floor(Math.random() * 60),
-      baggage: '2 x 23 kg',
-      refundable: idx !== 0,
-      seatsAvailable: 15 + Math.floor(Math.random() * 25),
-    };
-  });
+const calculateFlightDuration = (depTime, arrTime) => {
+  if (depTime && arrTime) {
+    const diff = new Date(arrTime) - new Date(depTime);
+    if (diff > 0 && !Number.isNaN(diff)) {
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      return `${h}h ${m}m`;
+    }
+  }
+  return '5h 15m';
 };
 
 /**
- * Search flights by origin (city or code), destination (city or code), cabinClass, stops, price, airline
+ * Dynamic pricing calculation based on airline tier and cabin class
+ */
+const calculateDynamicPrice = (airlineName = '', cabinClass = 'Economy', idx = 0) => {
+  let basePrice = 340 + ((idx * 47) % 180);
+  const lower = (airlineName || '').toLowerCase();
+  if (lower.includes('emirates') || lower.includes('singapore')) {
+    basePrice += 85;
+  } else if (lower.includes('qatar')) {
+    basePrice += 65;
+  } else if (lower.includes('flydubai') || lower.includes('airasia') || lower.includes('indigo')) {
+    basePrice -= 45;
+  }
+
+  if (cabinClass === 'Business') {
+    return Math.round(basePrice * 2.4);
+  }
+  if (cabinClass === 'First') {
+    return Math.round(basePrice * 4.8);
+  }
+  return Math.max(140, basePrice);
+};
+
+/**
+ * Search flights dynamically using live Aviationstack API
+ * Full dynamic: if there are no commercial flights between start and destination, returns empty list.
  */
 export const searchFlights = async (req, res, next) => {
   try {
@@ -64,137 +58,131 @@ export const searchFlights = async (req, res, next) => {
       airline,
       sort,
     } = req.query;
-    const isDbConnected = mongoose.connection.readyState === 1;
 
-    const buildRegexOr = (fieldCode, fieldCity, value) => {
-      if (!value) return null;
-      const clean = value.trim();
-      return {
-        $or: [
-          { [fieldCode]: new RegExp(`^${clean}$`, 'i') },
-          { [fieldCity]: new RegExp(clean, 'i') },
-        ],
+    const originTerm = origin ? origin.trim() : '';
+    const destTerm = destination ? destination.trim() : '';
+
+    const effOrigin = originTerm || 'DAC';
+    const effDest = destTerm || 'DXB';
+
+    const originAirport = findAirport(effOrigin);
+    const destAirport = findAirport(effDest);
+
+    const depIata = originAirport?.code || effOrigin.toUpperCase().slice(0, 3);
+    const arrIata = destAirport?.code || effDest.toUpperCase().slice(0, 3);
+
+    // Fetch live flights dynamically from Aviationstack API
+    const rawFlights = await getLiveRouteFlights(depIata, arrIata);
+
+    // Strict dynamic requirement: If no flights exist from that place to destination, return empty!
+    if (!rawFlights || rawFlights.length === 0) {
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        data: [],
+        message: `No flights found operating from ${originAirport.city} (${depIata}) to ${destAirport.city} (${arrIata}).`,
+      });
+    }
+
+    // Map live Aviationstack records into full platform flight models
+    let list = rawFlights.map((raw, idx) => {
+      const flightNum = raw.flight?.iata
+        || (raw.airline?.iata && raw.flight?.number ? `${raw.airline.iata}${raw.flight.number}` : `FL-${100 + idx}`);
+      const airlineName = raw.airline?.name || 'Commercial Airline';
+      const airlineIata = raw.airline?.iata || flightNum.slice(0, 2);
+
+      const depScheduled = raw.departure?.scheduled;
+      const arrScheduled = raw.arrival?.scheduled;
+      const duration = calculateFlightDuration(depScheduled, arrScheduled);
+
+      // Align departure date if user selected a specific departure date
+      let finalDepDate = depScheduled ? new Date(depScheduled) : new Date();
+      let finalArrDate = arrScheduled ? new Date(arrScheduled) : new Date(finalDepDate.getTime() + 4 * 3600000);
+
+      if (departureDate) {
+        const targetDate = new Date(departureDate);
+        if (!Number.isNaN(targetDate.getTime())) {
+          const originalHours = finalDepDate.getUTCHours();
+          const originalMinutes = finalDepDate.getUTCMinutes();
+          finalDepDate = new Date(Date.UTC(
+            targetDate.getUTCFullYear(),
+            targetDate.getUTCMonth(),
+            targetDate.getUTCDate(),
+            originalHours,
+            originalMinutes,
+            0,
+          ));
+          const durationMs = arrScheduled && depScheduled
+            ? (new Date(arrScheduled) - new Date(depScheduled))
+            : (4.5 * 3600000);
+          finalArrDate = new Date(finalDepDate.getTime() + Math.max(3600000, durationMs));
+        }
+      }
+
+      const calculatedPrice = calculateDynamicPrice(airlineName, cabinClass || 'Economy', idx);
+
+      const statusMap = {
+        active: 'In Flight',
+        scheduled: 'Scheduled',
+        landed: 'Landed',
+        cancelled: 'Cancelled',
       };
-    };
+      const flightStatus = statusMap[raw.flight_status?.toLowerCase()] || 'Scheduled';
 
-    if (isDbConnected) {
-      const filter = {};
-      const originMatch = buildRegexOr('origin.code', 'origin.city', origin);
-      const destMatch = buildRegexOr('destination.code', 'destination.city', destination);
+      return {
+        _id: `av_${flightNum.replace(/[^a-zA-Z0-9]/g, '')}_${idx}_${raw.flight_date || 'live'}`,
+        airline: airlineName,
+        airlineCode: airlineIata,
+        flightNumber: flightNum,
+        origin: {
+          code: raw.departure?.iata || originAirport.code,
+          city: originAirport.city || raw.departure?.airport || 'Origin',
+          airport: raw.departure?.airport || originAirport.airport,
+        },
+        destination: {
+          code: raw.arrival?.iata || destAirport.code,
+          city: destAirport.city || raw.arrival?.airport || 'Destination',
+          airport: raw.arrival?.airport || destAirport.airport,
+        },
+        departureTime: finalDepDate.toISOString(),
+        arrivalTime: finalArrDate.toISOString(),
+        duration,
+        stops: 0,
+        stopoverCities: [],
+        cabinClass: cabinClass && cabinClass !== 'All' ? cabinClass : 'Economy',
+        price: calculatedPrice,
+        baggage: '2 x 23 kg',
+        refundable: idx % 3 !== 0,
+        seatsAvailable: 10 + ((idx * 5) % 20),
+        status: flightStatus,
+        rawStatus: raw.flight_status || 'scheduled',
+      };
+    });
 
-      if (originMatch && destMatch) {
-        filter.$and = [originMatch, destMatch];
-      } else if (originMatch) {
-        Object.assign(filter, originMatch);
-      } else if (destMatch) {
-        Object.assign(filter, destMatch);
-      }
-
-      if (cabinClass && cabinClass !== 'All') filter.cabinClass = cabinClass;
-      if (stops !== undefined && stops !== '' && stops !== 'all') filter.stops = Number(stops);
-      if (airline) filter.airline = new RegExp(airline.trim(), 'i');
-      if (maxPrice) filter.price = { $lte: Number(maxPrice) };
-
-      let query = Flight.find(filter);
-      if (sort === 'price_asc') query = query.sort({ price: 1 });
-      else if (sort === 'price_desc') query = query.sort({ price: -1 });
-      else if (sort === 'duration') query = query.sort({ duration: 1 });
-      else query = query.sort({ price: 1, departureTime: 1 });
-
-      let results = await query.exec();
-
-      // If user searched a specific route and no flights found in DB yet, dynamically generate & save!
-      if (results.length === 0 && (origin || destination)) {
-        const originAirport = findAirport(origin || 'DAC');
-        const destAirport = findAirport(destination || 'DXB');
-
-        // Check if Aviationstack has live route flights
-        let dynamicList = [];
-        try {
-          const liveAviation = await getLiveRouteFlights(originAirport.code, destAirport.code);
-          if (liveAviation && liveAviation.length > 0) {
-            dynamicList = liveAviation.map((item, idx) => ({
-              airline: item.airline?.name || 'Commercial Airline',
-              airlineCode: item.airline?.iata || 'CA',
-              flightNumber: item.flight?.iata || `${item.airline?.iata || 'FL'}-${100 + idx}`,
-              origin: {
-                code: item.departure?.iata || originAirport.code,
-                city: originAirport.city,
-                airport: item.departure?.airport || originAirport.airport,
-              },
-              destination: {
-                code: item.arrival?.iata || destAirport.code,
-                city: destAirport.city,
-                airport: item.arrival?.airport || destAirport.airport,
-              },
-              departureTime: item.departure?.scheduled ? new Date(item.departure.scheduled) : new Date(),
-              arrivalTime: item.arrival?.scheduled ? new Date(item.arrival.scheduled) : new Date(Date.now() + 5 * 3600000),
-              duration: '4h 30m',
-              stops: 0,
-              stopoverCities: [],
-              cabinClass: 'Economy',
-              price: 320 + idx * 45,
-              baggage: '2 x 23 kg',
-              refundable: true,
-              seatsAvailable: 20,
-            }));
-          }
-        } catch {
-          // Fallback to dynamic generator
-        }
-
-        if (dynamicList.length === 0) {
-          dynamicList = generateDynamicFlights(originAirport, destAirport, departureDate);
-        }
-
-        // Persist newly generated route flights into MongoDB Atlas
-        try {
-          results = await Flight.insertMany(dynamicList);
-        } catch {
-          results = dynamicList;
-        }
-      }
-
-      if (results.length === 0) {
-        results = await Flight.find().sort({ price: 1 }).limit(10);
-      }
-
-      return res.status(200).json({ success: true, count: results.length, data: results });
+    // Apply optional filters
+    if (cabinClass && cabinClass !== 'All') {
+      list = list.filter((f) => f.cabinClass === cabinClass);
+    }
+    if (stops !== undefined && stops !== '' && stops !== 'all') {
+      list = list.filter((f) => f.stops === Number(stops));
+    }
+    if (airline) {
+      list = list.filter((f) => f.airline.toLowerCase().includes(airline.toLowerCase()));
+    }
+    if (maxPrice) {
+      list = list.filter((f) => f.price <= Number(maxPrice));
     }
 
-    // Memory store fallback
-    let list = [...memoryStore.flights];
-    if (origin) {
-      list = list.filter(
-        (f) => f.origin.code.toLowerCase() === origin.toLowerCase()
-          || f.origin.city.toLowerCase().includes(origin.toLowerCase()),
-      );
-    }
-    if (destination) {
-      list = list.filter(
-        (f) => f.destination.code.toLowerCase() === destination.toLowerCase()
-          || f.destination.city.toLowerCase().includes(destination.toLowerCase()),
-      );
-    }
-    if (cabinClass && cabinClass !== 'All') list = list.filter((f) => f.cabinClass === cabinClass);
-    if (stops !== undefined && stops !== '' && stops !== 'all') list = list.filter((f) => f.stops === Number(stops));
-    if (airline) list = list.filter((f) => f.airline.toLowerCase().includes(airline.toLowerCase()));
-    if (maxPrice) list = list.filter((f) => f.price <= Number(maxPrice));
-
-    if (list.length === 0 && (origin || destination)) {
-      const originAirport = findAirport(origin || 'DAC');
-      const destAirport = findAirport(destination || 'DXB');
-      const generated = generateDynamicFlights(originAirport, destAirport, departureDate);
-      list = generated;
-      memoryStore.flights.push(...generated);
-    } else if (list.length === 0) {
-      list = [...memoryStore.flights];
-    }
-
+    // Apply sorting
     if (sort === 'price_desc') list.sort((a, b) => b.price - a.price);
-    else list.sort((a, b) => a.price - b.price);
+    else if (sort === 'price_asc') list.sort((a, b) => a.price - b.price);
+    else if (sort === 'duration') list.sort((a, b) => a.duration.localeCompare(b.duration));
 
-    return res.status(200).json({ success: true, count: list.length, data: list });
+    return res.status(200).json({
+      success: true,
+      count: list.length,
+      data: list,
+    });
   } catch (error) {
     return next(error);
   }
@@ -221,11 +209,52 @@ export const getPopularRoutes = async (req, res, next) => {
  */
 export const getFlightById = async (req, res, next) => {
   try {
-    let flight;
-    if (mongoose.connection.readyState === 1) {
-      flight = await Flight.findById(req.params.id);
-    } else {
-      flight = memoryStore.flights.find((f) => f._id.toString() === req.params.id);
+    const { id } = req.params;
+    let flight = null;
+
+    if (mongoose.isValidObjectId(id) && mongoose.connection.readyState === 1) {
+      flight = await Flight.findById(id);
+    }
+    if (!flight) {
+      flight = memoryStore.flights.find((f) => f._id?.toString() === id);
+    }
+
+    if (!flight && id && id.startsWith('av_')) {
+      const parts = id.split('_');
+      const flightNum = parts[1];
+      if (flightNum) {
+        const live = await trackFlightStatus(flightNum);
+        if (live && live.length > 0) {
+          const l = live[0];
+          flight = {
+            _id: id,
+            airline: l.airline,
+            airlineCode: l.airlineIata,
+            flightNumber: l.flightNumber,
+            origin: {
+              code: l.origin,
+              city: l.originCity,
+              airport: l.originAirport,
+            },
+            destination: {
+              code: l.destination,
+              city: l.destinationCity,
+              airport: l.destinationAirport,
+            },
+            departureTime: l.scheduledDepFull || new Date().toISOString(),
+            arrivalTime: l.scheduledArrFull || new Date().toISOString(),
+            duration: '5h 15m',
+            stops: 0,
+            stopoverCities: [],
+            cabinClass: 'Economy',
+            price: 420,
+            baggage: '2 x 23 kg',
+            refundable: true,
+            seatsAvailable: 15,
+            status: l.status,
+          };
+        }
+      }
     }
 
     if (!flight) {

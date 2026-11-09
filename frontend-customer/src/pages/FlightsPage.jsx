@@ -173,17 +173,43 @@ export const FlightsPage = () => {
             ) : filteredFlights.length === 0 ? (
               <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 space-y-3">
                 <Plane className="h-10 w-10 text-slate-300 mx-auto" />
-                <h3 className="font-bold text-base text-slate-800">No flights found matching your filters</h3>
+                <h3 className="font-bold text-base text-slate-800">
+                  {flights.length === 0
+                    ? `No flights found from ${origin} to ${destination}`
+                    : 'No flights found matching your filters'}
+                </h3>
                 <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                  Try adjusting the maximum price or number of stops filter to view more airline fares.
+                  {flights.length === 0
+                    ? `There are no scheduled direct commercial flights operating between ${origin} and ${destination} on ${departureDate || 'this date'}. Try selecting another travel date or nearby departure/arrival airport.`
+                    : 'Try adjusting the maximum price or number of stops filter to view more airline fares.'}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => setFilters({ stops: 'all', maxPrice: 1500, airlines: [] })}
-                  className="text-xs text-brand-600 font-bold hover:underline"
-                >
-                  Reset All Filters
-                </button>
+                {flights.length === 0 ? (
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const sp = new URLSearchParams({
+                          origin: 'DAC',
+                          destination: 'DXB',
+                          departureDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
+                          cabinClass: 'Economy',
+                        });
+                        setSearchParams(sp);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-brand-50 text-brand-600 hover:bg-brand-100 transition-colors"
+                    >
+                      Search Popular Route: Dhaka (DAC) → Dubai (DXB)
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setFilters({ stops: 'all', maxPrice: 1500, airlines: [] })}
+                    className="text-xs text-brand-600 font-bold hover:underline"
+                  >
+                    Reset All Filters
+                  </button>
+                )}
               </div>
             ) : (
               <div className="space-y-4">

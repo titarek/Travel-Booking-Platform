@@ -113,7 +113,10 @@ export const resetAmadeusToken = () => {
 };
 
 const getAmadeusToken = async () => {
-  if (!env.AMADEUS_CLIENT_ID || !env.AMADEUS_CLIENT_SECRET) {
+  const clientId = env.AMADEUS_CLIENT_ID || process.env.AMADEUS_CLIENT_ID;
+  const clientSecret = env.AMADEUS_CLIENT_SECRET || process.env.AMADEUS_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret || clientId.startsWith('amadeus_') || clientSecret.startsWith('amadeus_')) {
     return null;
   }
   if (cachedAmadeusToken && Date.now() < tokenExpiresAt) {
@@ -122,8 +125,8 @@ const getAmadeusToken = async () => {
   try {
     const params = new URLSearchParams({
       grant_type: 'client_credentials',
-      client_id: env.AMADEUS_CLIENT_ID,
-      client_secret: env.AMADEUS_CLIENT_SECRET,
+      client_id: clientId,
+      client_secret: clientSecret,
     });
     const response = await fetch('https://test.api.amadeus.com/v1/security/oauth2/token', {
       method: 'POST',

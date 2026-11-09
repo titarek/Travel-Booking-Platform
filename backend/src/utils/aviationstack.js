@@ -233,21 +233,32 @@ export const trackFlightStatus = async (inputQuery) => {
  * Fetch live route flights from Aviationstack
  */
 export const getLiveRouteFlights = async (depIata, arrIata) => {
-  const cacheKey = `route_${depIata}_${arrIata}`;
+  if (!depIata || !arrIata) return [];
+  const cacheKey = `route_${depIata.toUpperCase()}_${arrIata.toUpperCase()}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
   const data = await fetchAviationstack('flights', {
     dep_iata: depIata.toUpperCase(),
     arr_iata: arrIata.toUpperCase(),
-    limit: 10,
+    limit: 30,
   });
 
   if (data?.data && Array.isArray(data.data) && data.data.length > 0) {
-    const formatted = data.data.map((raw) => formatAviationstackFlight(raw));
-    setCache(cacheKey, formatted);
-    return formatted;
+    const seen = new Set();
+    const unique = data.data.filter((raw) => {
+      const flightNum = raw.flight?.iata
+        || (raw.airline?.iata && raw.flight?.number ? `${raw.airline.iata}${raw.flight.number}` : null);
+      if (!flightNum || seen.has(flightNum)) {
+        return false;
+      }
+      seen.add(flightNum);
+      return true;
+    });
+    setCache(cacheKey, unique);
+    return unique;
   }
 
+  setCache(cacheKey, []);
   return [];
 };
