@@ -3,7 +3,6 @@ import {
   Search,
   Compass,
   Radio,
-  ArrowRight,
   ArrowLeftRight,
   Plane,
   Building2,
@@ -12,10 +11,12 @@ import {
   MapPin,
   CheckCircle2,
   AlertCircle,
+  Navigation,
 } from 'lucide-react';
 import { Button } from '../ui/Button.jsx';
 import { Badge } from '../ui/Badge.jsx';
 import api from '../../api/axios.js';
+import { FlightRadarMap } from '../flights/FlightRadarMap.jsx';
 
 export const FlightTrackerWidget = () => {
   const [searchMode, setSearchMode] = useState('route'); // 'route' | 'flight'
@@ -27,6 +28,11 @@ export const FlightTrackerWidget = () => {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [activeMapId, setActiveMapId] = useState(null);
+
+  const handleToggleMap = (flightKey) => {
+    setActiveMapId((prev) => (prev === flightKey ? null : flightKey));
+  };
 
   // Fetch flights by route or flight number
   const executeSearch = async (params) => {
@@ -288,151 +294,217 @@ export const FlightTrackerWidget = () => {
       )}
 
       {/* List of All Flights Returned by the API */}
-      <div className="space-y-4 max-h-[580px] overflow-y-auto pr-1">
-        {flightsList.map((flight, index) => (
-          <div
-            key={`${flight.flightNumber}-${flight.flightDate || index}-${index}`}
-            className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4 hover:border-brand-300 hover:shadow-md transition-all"
-          >
-            {/* Flight Top Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center font-black text-brand-600 shadow-sm text-sm">
-                  {flight.airlineIata || flight.flightNumber.slice(0, 2)}
+      <div className="space-y-4 max-h-[750px] overflow-y-auto pr-1">
+        {flightsList.map((flight, index) => {
+          const flightKey = `${flight.flightNumber}-${flight.flightDate || index}-${index}`;
+          const isMapOpen = activeMapId === flightKey;
+          const flightObj = {
+            airline: flight.airline,
+            flightNumber: flight.flightNumber,
+            origin: {
+              code: flight.origin,
+              city: flight.originCity,
+              airport: flight.originAirport,
+            },
+            destination: {
+              code: flight.destination,
+              city: flight.destinationCity,
+              airport: flight.destinationAirport,
+            },
+            departureTime: flight.scheduledDep,
+            arrivalTime: flight.scheduledArr,
+            status: flight.status,
+          };
+
+          return (
+            <div
+              key={flightKey}
+              className={`p-5 rounded-2xl border transition-all ${
+                isMapOpen
+                  ? 'bg-brand-50/10 border-brand-300 ring-2 ring-brand-500/10 shadow-md space-y-4'
+                  : 'bg-slate-50 border-slate-200 space-y-4 hover:border-brand-300 hover:shadow-md'
+              }`}
+            >
+              {/* Flight Top Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center font-black text-brand-600 shadow-sm text-sm">
+                    {flight.airlineIata || flight.flightNumber.slice(0, 2)}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-base font-black text-slate-900">{flight.flightNumber}</span>
+                      <span className="text-xs text-slate-500 font-bold">• {flight.airline}</span>
+                      {flight.source === 'aviationstack_live' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black">
+                          <Radio className="h-3 w-3 text-emerald-500 animate-pulse" />
+                          Live Radar
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400 font-medium">
+                      Aircraft: {flight.aircraft || 'Commercial Airliner'} • Date: {flight.flightDate}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-base font-black text-slate-900">{flight.flightNumber}</span>
-                    <span className="text-xs text-slate-500 font-bold">• {flight.airline}</span>
-                    {flight.source === 'aviationstack_live' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black">
-                      <Radio className="h-3 w-3 text-emerald-500 animate-pulse" />
-                      Live Radar
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleMap(flightKey)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                      isMapOpen
+                        ? 'bg-brand-600 text-white shadow-sm'
+                        : 'bg-white hover:bg-brand-50 text-brand-600 border border-slate-200 hover:border-brand-300 shadow-sm'
+                    }`}
+                    title="View Live Flight Position on Radar Map"
+                  >
+                    <Navigation className="h-3.5 w-3.5" />
+                    <span>{isMapOpen ? 'Hide Radar Map' : 'View Live Map'}</span>
+                  </button>
+
+                  <Badge variant={flight.statusVariant || 'info'} className="text-xs font-black px-3 py-1">
+                    {flight.status || 'Active'}
+                  </Badge>
+                </div>
+              </div>
+
+              {/* Route Display: Explicit "FROM" & "WHERE IT IS GOING" */}
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-4 bg-white p-4 rounded-xl border border-slate-200/60 shadow-sm">
+                {/* FROM (Origin) */}
+                <div className="space-y-1">
+                  <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-brand-50 text-brand-700 text-[10px] font-black uppercase tracking-wider">
+                    <MapPin className="h-3 w-3" />
+                    FROM (Origin)
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-black text-slate-900">{flight.origin}</span>
+                    <span className="text-xs font-extrabold text-slate-600">{flight.originCity}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-medium truncate max-w-[220px]">
+                    {flight.originAirport}
+                  </p>
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-xs font-black text-brand-600 flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Dep: {flight.scheduledDep || 'Scheduled'}
                     </span>
+                    {flight.departureDelay && (
+                      <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {flight.departureDelay}
+                      </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400 font-medium">
-                    Aircraft: {flight.aircraft || 'Commercial Airliner'} • Date: {flight.flightDate}
+                </div>
+
+                {/* PROGRESS / ROUTE ARROW (Clickable to toggle map) */}
+                <button
+                  type="button"
+                  onClick={() => handleToggleMap(flightKey)}
+                  className="flex flex-col items-center justify-center px-2 py-2 group/prog cursor-pointer hover:bg-slate-50 rounded-xl transition-colors border-none bg-transparent"
+                  title="Click to toggle live radar map"
+                >
+                  <div className="flex items-center gap-1 text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">
+                    <Compass className="h-3 w-3 text-brand-500" />
+                    <span>{flight.status === 'Landed' ? 'Flight Complete (100%)' : `En Route (${flight.progressPercent || 50}%)`}</span>
+                  </div>
+
+                  <div className="w-36 sm:w-44 h-2 bg-slate-100 rounded-full overflow-hidden relative border border-slate-200">
+                    <div
+                      className="h-full bg-gradient-to-r from-brand-500 via-sky-400 to-emerald-500 transition-all duration-500"
+                      style={{ width: `${flight.progressPercent || 50}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-[10px] text-brand-600 group-hover/prog:underline mt-1.5 font-bold">
+                    <Navigation className="h-3 w-3 text-brand-500" />
+                    <span>{isMapOpen ? 'Hide Radar Map' : 'View Live Map'}</span>
+                  </div>
+                </button>
+
+                {/* WHERE IT IS GOING (Destination) */}
+                <div className="space-y-1 md:text-right">
+                  <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-wider">
+                    <Plane className="h-3 w-3" />
+                    WHERE IT IS GOING (Destination)
+                  </div>
+                  <div className="flex items-baseline gap-2 md:justify-end">
+                    <span className="text-2xl font-black text-slate-900">{flight.destination}</span>
+                    <span className="text-xs font-extrabold text-slate-600">{flight.destinationCity}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-medium truncate max-w-[220px] md:ml-auto">
+                    {flight.destinationAirport}
                   </p>
+                  <div className="flex items-center gap-2 pt-1 md:justify-end">
+                    <span className="text-xs font-black text-emerald-600 flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Arr: {flight.scheduledArr || 'Scheduled'}
+                    </span>
+                    {flight.arrivalDelay && (
+                      <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {flight.arrivalDelay}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <Badge variant={flight.statusVariant || 'info'} className="text-xs font-black px-3 py-1">
-                  {flight.status || 'Active'}
-                </Badge>
-              </div>
-            </div>
-
-            {/* Route Display: Explicit "FROM" & "WHERE IT IS GOING" */}
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-4 bg-white p-4 rounded-xl border border-slate-200/60 shadow-sm">
-              {/* FROM (Origin) */}
-              <div className="space-y-1">
-                <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-brand-50 text-brand-700 text-[10px] font-black uppercase tracking-wider">
-                  <MapPin className="h-3 w-3" />
-                  FROM (Origin)
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-black text-slate-900">{flight.origin}</span>
-                  <span className="text-xs font-extrabold text-slate-600">{flight.originCity}</span>
-                </div>
-                <p className="text-[11px] text-slate-400 font-medium truncate max-w-[220px]">
-                  {flight.originAirport}
-                </p>
-                <div className="flex items-center gap-2 pt-1">
-                  <span className="text-xs font-black text-brand-600 flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    Dep: {flight.scheduledDep || 'Scheduled'}
-                  </span>
-                  {flight.departureDelay && (
-                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
-                    {flight.departureDelay}
-                  </span>
-                  )}
-                </div>
-              </div>
-
-              {/* PROGRESS / ROUTE ARROW */}
-              <div className="flex flex-col items-center justify-center px-2 py-2">
-                <div className="flex items-center gap-1 text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">
-                  <Compass className="h-3 w-3 text-brand-500" />
-                  <span>{flight.status === 'Landed' ? 'Flight Complete (100%)' : `En Route (${flight.progressPercent || 50}%)`}</span>
-                </div>
-
-                <div className="w-36 sm:w-44 h-2 bg-slate-100 rounded-full overflow-hidden relative border border-slate-200">
-                  <div
-                    className="h-full bg-gradient-to-r from-brand-500 via-sky-400 to-emerald-500 transition-all duration-500"
-                    style={{ width: `${flight.progressPercent || 50}%` }}
+              {/* Live Interactive Flight Radar Map (Displayed when clicked) */}
+              {isMapOpen && (
+                <div className="space-y-2 pt-1 animate-in fade-in duration-300">
+                  <div className="flex items-center justify-between text-xs px-1">
+                    <span className="font-extrabold text-slate-800 flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                      Live Radar Route: {flight.origin} → {flight.destination} ({flight.flightNumber})
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-500">
+                      Geoapify & Aviationstack Telemetry
+                    </span>
+                  </div>
+                  <FlightRadarMap
+                    flight={flightObj}
+                    statusData={flight}
+                    height="h-64 sm:h-72"
+                    className="w-full rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden"
                   />
                 </div>
+              )}
 
-                <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1 font-bold">
-                  <ArrowRight className="h-3 w-3 text-brand-500" />
-                  <span>Altitude: {flight.altitude || 'Cruising'}</span>
+              {/* Terminal / Gate / Baggage Belt Info */}
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="p-2.5 bg-white rounded-xl border border-slate-100 shadow-sm">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
+                    <Building2 className="h-3 w-3" />
+                    Terminal
+                  </span>
+                  <span className="text-xs font-black text-slate-800 block mt-0.5">
+                    {flight.terminal || 'Terminal 1'}
+                  </span>
                 </div>
-              </div>
 
-              {/* WHERE IT IS GOING (Destination) */}
-              <div className="space-y-1 md:text-right">
-                <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-wider">
-                  <Plane className="h-3 w-3" />
-                  WHERE IT IS GOING (Destination)
-                </div>
-                <div className="flex items-baseline gap-2 md:justify-end">
-                  <span className="text-2xl font-black text-slate-900">{flight.destination}</span>
-                  <span className="text-xs font-extrabold text-slate-600">{flight.destinationCity}</span>
-                </div>
-                <p className="text-[11px] text-slate-400 font-medium truncate max-w-[220px] md:ml-auto">
-                  {flight.destinationAirport}
-                </p>
-                <div className="flex items-center gap-2 pt-1 md:justify-end">
-                  <span className="text-xs font-black text-emerald-600 flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    Arr: {flight.scheduledArr || 'Scheduled'}
+                <div className="p-2.5 bg-white rounded-xl border border-slate-100 shadow-sm">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
+                    <Plane className="h-3 w-3" />
+                    Departure Gate
                   </span>
-                  {flight.arrivalDelay && (
-                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
-                    {flight.arrivalDelay}
+                  <span className="text-xs font-black text-brand-600 block mt-0.5">
+                    {flight.gate || 'Gate TBA'}
                   </span>
-                  )}
+                </div>
+
+                <div className="p-2.5 bg-white rounded-xl border border-slate-100 shadow-sm">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
+                    <Luggage className="h-3 w-3" />
+                    Baggage Belt
+                  </span>
+                  <span className="text-xs font-black text-emerald-600 block mt-0.5">
+                    {flight.belt || 'Belt 02'}
+                  </span>
                 </div>
               </div>
             </div>
-
-            {/* Terminal / Gate / Baggage Belt Info */}
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="p-2.5 bg-white rounded-xl border border-slate-100 shadow-sm">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
-                  <Building2 className="h-3 w-3" />
-                  Terminal
-                </span>
-                <span className="text-xs font-black text-slate-800 block mt-0.5">
-                  {flight.terminal || 'Terminal 1'}
-                </span>
-              </div>
-
-              <div className="p-2.5 bg-white rounded-xl border border-slate-100 shadow-sm">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
-                  <Plane className="h-3 w-3" />
-                  Departure Gate
-                </span>
-                <span className="text-xs font-black text-brand-600 block mt-0.5">
-                  {flight.gate || 'Gate TBA'}
-                </span>
-              </div>
-
-              <div className="p-2.5 bg-white rounded-xl border border-slate-100 shadow-sm">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-center gap-1">
-                  <Luggage className="h-3 w-3" />
-                  Baggage Belt
-                </span>
-                <span className="text-xs font-black text-emerald-600 block mt-0.5">
-                  {flight.belt || 'Belt 02'}
-                </span>
-              </div>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
