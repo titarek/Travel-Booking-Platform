@@ -1,4 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+} from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -10,7 +15,6 @@ import {
 import L from 'leaflet';
 import {
   Plane,
-  Radio,
   Navigation,
 } from 'lucide-react';
 import {
@@ -82,25 +86,32 @@ const createAircraftIcon = (bearing, flightNumber, altitude) => L.divIcon({
 });
 
 /**
- * Controller component to automatically pan and fit bounds smoothly
+ * Controller component to automatically pan and fit bounds smoothly ONCE per route,
+ * without overriding manual user interactions like zooming in (+) or dragging.
  */
-const MapAutoFitter = ({ bounds }) => {
+const MapAutoFitter = ({ routeKey, originCoords, destCoords }) => {
   const map = useMap();
+  const fittedKeyRef = useRef(null);
 
   useEffect(() => {
-    if (bounds && bounds.length >= 2) {
-      try {
-        const leafletBounds = L.latLngBounds(bounds);
-        map.fitBounds(leafletBounds, {
-          padding: [50, 50],
-          maxZoom: 7,
-          animate: true,
-        });
-      } catch {
-        // Fallback
-      }
+    if (!originCoords || !destCoords) return;
+    if (fittedKeyRef.current === routeKey) return;
+
+    try {
+      const leafletBounds = L.latLngBounds([
+        [originCoords.lat, originCoords.lng],
+        [destCoords.lat, destCoords.lng],
+      ]);
+      map.fitBounds(leafletBounds, {
+        padding: [45, 45],
+        maxZoom: 6,
+        animate: false,
+      });
+      fittedKeyRef.current = routeKey;
+    } catch {
+      // Fallback
     }
-  }, [bounds, map]);
+  }, [routeKey, originCoords, destCoords, map]);
 
   return null;
 };
@@ -217,21 +228,19 @@ export const FlightRadarMap = ({
     return { completedPath: completed, remainingPath: remaining };
   }, [fullTrajectoryPath, liveProgress, currentAircraft]);
 
-  // Bounds containing origin, destination, and the aircraft
-  const mapBounds = useMemo(() => [
-    [originCoords.lat, originCoords.lng],
-    [destCoords.lat, destCoords.lng],
-    [currentAircraft.lat, currentAircraft.lng],
-  ], [originCoords, destCoords, currentAircraft]);
-
   const flightNumber = statusData.flightNumber || flight?.flightNumber || 'FLIGHT';
   const altitude = statusData.altitude || '38,000 ft';
   const speed = statusData.speed || '860 km/h';
+  const routeKey = `${originCode}-${destCode}-${flightNumber}`;
 
   return (
     <div className={`w-full ${height} rounded-2xl overflow-hidden border border-slate-200/90 shadow-inner relative group ${className}`}>
       <MapContainer
-        bounds={mapBounds}
+        center={[
+          (originCoords.lat + destCoords.lat) / 2,
+          (originCoords.lng + destCoords.lng) / 2,
+        ]}
+        zoom={4}
         scrollWheelZoom={false}
         className="w-full h-full min-h-[220px]"
       >
@@ -243,8 +252,12 @@ export const FlightRadarMap = ({
           maxZoom={12}
         />
 
-        {/* Dynamic Bounds Auto-fitter */}
-        <MapAutoFitter bounds={mapBounds} />
+        {/* Initial Bounds Auto-fitter: runs once per route and never overrides user manual zoom (+) or pan */}
+        <MapAutoFitter
+          routeKey={routeKey}
+          originCoords={originCoords}
+          destCoords={destCoords}
+        />
 
         {/* Completed Flight Route Polyline (Solid Glowing Brand Blue) */}
         {completedPath.length > 0 && (
@@ -328,20 +341,6 @@ export const FlightRadarMap = ({
           </Popup>
         </Marker>
       </MapContainer>
-
-      {/* Floating HUD Telemetry Pill (Centered at Top to avoid covering zoom controls) */}
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none flex items-center justify-center">
-        <div className="bg-slate-900/90 backdrop-blur-md text-white px-3 py-1.5 rounded-xl border border-white/10 shadow-lg flex items-center gap-2 text-xs whitespace-nowrap">
-          <Radio className="h-3.5 w-3.5 text-emerald-400 animate-pulse shrink-0" />
-          <span className="font-bold text-white text-[11px]">
-            GPS: <span className="font-mono text-emerald-300">{currentAircraft.lat.toFixed(2)}°, {currentAircraft.lng.toFixed(2)}°</span>
-          </span>
-          <span className="text-slate-400 text-[10px] hidden sm:inline">•</span>
-          <span className="text-slate-300 text-[11px] hidden sm:inline">
-            Alt: <strong className="text-white">{altitude}</strong>
-          </span>
-        </div>
-      </div>
 
       {/* Floating Live Badge Top Right */}
       <div className="absolute top-3 right-3 z-[1000] pointer-events-none hidden sm:flex items-center gap-1.5 bg-white/90 backdrop-blur-sm px-2.5 py-1 rounded-xl border border-slate-200/80 shadow-sm text-[10px] font-bold text-slate-700">
