@@ -13,6 +13,7 @@ import packageRoutes from './routes/package.routes.js';
 import bookingRoutes from './routes/booking.routes.js';
 import externalRoutes from './routes/external.routes.js';
 import adminRoutes from './routes/admin.routes.js';
+import offerRoutes from './routes/offer.routes.js';
 
 const app = express();
 
@@ -77,6 +78,7 @@ app.use('/api/hotels', hotelRoutes);
 app.use('/api/packages', packageRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/external', externalRoutes);
+app.use('/api/offers', offerRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler for unknown endpoints

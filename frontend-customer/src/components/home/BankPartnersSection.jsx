@@ -1,9 +1,10 @@
 import { CreditCard, Sparkles, ShieldCheck, ArrowRight } from 'lucide-react';
 
-export const BankPartnersSection = () => {
-  const partners = [
+export const BankPartnersSection = ({ offers = [] }) => {
+  const defaultPartners = [
     {
       id: 'ebl-visa',
+      _id: 'ebl-visa',
       title: 'EBL Visa Travel Lifestyle Card',
       subtitle: 'Exclusive 0% EMI up to 12 months & Balaka Lounge Access',
       discount: 'Up to 15% OFF',
@@ -14,6 +15,7 @@ export const BankPartnersSection = () => {
     },
     {
       id: 'bkash-offer',
+      _id: 'bkash-offer',
       title: 'bKash Instant Cash Back',
       subtitle: 'Pay seamlessly with bKash and get instant cashback on all domestic routes',
       discount: '৳ 2,000 Cashback',
@@ -24,6 +26,7 @@ export const BankPartnersSection = () => {
     },
     {
       id: 'city-amex',
+      _id: 'city-amex',
       title: 'City Bank American Express',
       subtitle: 'Premium travel privileges, priority check-in and curated resort stays',
       discount: '12% OFF Hotels',
@@ -33,6 +36,8 @@ export const BankPartnersSection = () => {
       features: ['City Bank Amex Lounge at Hazrat Shahjalal Intl', 'Free Room Upgrade at 5-Star Partner Resorts', 'Overseas Travel Medical Insurance'],
     },
   ];
+
+  const partners = offers && offers.length > 0 ? offers : defaultPartners;
 
   return (
     <section className="space-y-6">
@@ -55,7 +60,7 @@ export const BankPartnersSection = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {partners.map((partner) => (
           <div
-            key={partner.id}
+            key={partner._id || partner.id}
             className={`p-6 rounded-3xl bg-gradient-to-br ${partner.gradient} text-white relative overflow-hidden shadow-xl flex flex-col justify-between space-y-6 group hover:-translate-y-1 transition-all duration-300`}
           >
             <div className="space-y-4 relative z-10">

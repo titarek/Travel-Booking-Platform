@@ -64,7 +64,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-      {/* Dark backdrop - hidden during print */}
+      {/* Dark backdrop */}
       <div
         className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm transition-opacity no-print"
         onClick={onClose}
@@ -73,12 +73,12 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
 
       {/* Modal Dialog Window */}
       <div className="relative w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden z-10 my-6 no-print-container">
-        {/* Modal Top Control Bar (Screen only, hidden on paper) */}
+        {/* Modal Top Control Bar */}
         <div className="flex items-center justify-between px-6 py-3.5 bg-slate-50 border-b border-slate-200 no-print">
           <div className="flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-xs font-black uppercase tracking-wider text-slate-700">
-              Official Electronic Ticket Preview
+              Customer E-Ticket Voucher (Passenger Copy)
             </span>
           </div>
 
@@ -86,7 +86,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
             <button
               type="button"
               onClick={handlePrint}
-              className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-brand-500/20 transition-all cursor-pointer"
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-indigo-500/20 transition-all cursor-pointer"
             >
               <Printer className="h-3.5 w-3.5" />
               <span>Print Official E-Ticket</span>
@@ -102,9 +102,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
           </div>
         </div>
 
-        {/* =========================================================================
-            PRINTABLE E-TICKET VOUCHER (This exact element prints on paper)
-            ========================================================================= */}
+        {/* Printable E-Ticket Voucher */}
         <div
           id="printable-e-ticket"
           className="p-6 sm:p-8 bg-white text-slate-900 space-y-6 max-h-[82vh] overflow-y-auto print:max-h-none print:overflow-visible print:p-0"
@@ -113,7 +111,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
           <div className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-slate-900 pb-5">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-lg bg-brand-600 text-white flex items-center justify-center font-black">
+                <div className="h-8 w-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-black">
                   <Plane className="h-5 w-5" />
                 </div>
                 <h1 className="text-2xl font-black tracking-tight text-slate-900">Travel.</h1>
@@ -131,7 +129,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
               <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
                 Booking Reference (PNR)
               </span>
-              <p className="text-xl sm:text-2xl font-mono font-black text-brand-600 tracking-wider">
+              <p className="text-xl sm:text-2xl font-mono font-black text-indigo-600 tracking-wider">
                 {booking.bookingReference}
               </p>
               <div className="flex items-center justify-end gap-2 pt-1">
@@ -195,7 +193,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                  <Plane className="h-4 w-4 text-brand-600" />
+                  <Plane className="h-4 w-4 text-indigo-600" />
                   Flight Journey Itinerary
                 </h2>
                 <span className="text-xs font-bold text-slate-600 font-mono">
@@ -225,13 +223,13 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
                   {/* Flight Track / Duration */}
                   <div className="flex-1 px-4 text-center space-y-1">
                     <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center justify-center gap-1">
-                      <Clock className="h-3 w-3 text-brand-600" />
+                      <Clock className="h-3 w-3 text-indigo-600" />
                       Duration: {item.duration || '4h 30m'}
                     </span>
                     <div className="relative my-2">
                       <div className="h-[2px] w-full bg-slate-200" />
                       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-2">
-                        <Plane className="h-3.5 w-3.5 text-brand-600 rotate-90" />
+                        <Plane className="h-3.5 w-3.5 text-indigo-600 rotate-90" />
                       </div>
                     </div>
                     <span className="text-[10px] font-bold text-emerald-600">
@@ -265,7 +263,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
                   <div>
                     <span className="text-slate-400 font-medium block">Checked Baggage</span>
                     <strong className="text-slate-900 flex items-center gap-1">
-                      <Luggage className="h-3 w-3 text-brand-600" />
+                      <Luggage className="h-3 w-3 text-indigo-600" />
                       {item.baggage || '2 x 23 kg'}
                     </strong>
                   </div>
@@ -275,7 +273,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
                   </div>
                   <div>
                     <span className="text-slate-400 font-medium block">Boarding Seat</span>
-                    <strong className="text-brand-600 font-mono font-bold">Assigned at Check-in</strong>
+                    <strong className="text-indigo-600 font-mono font-bold">Assigned at Check-in</strong>
                   </div>
                 </div>
               </div>
@@ -286,7 +284,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
           {isHotel && (
             <div className="space-y-3">
               <h2 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                <Building2 className="h-4 w-4 text-brand-600" />
+                <Building2 className="h-4 w-4 text-indigo-600" />
                 Hotel Accommodation Voucher
               </h2>
               <div className="border border-slate-200 rounded-2xl p-4 bg-white space-y-3 text-xs">
@@ -295,7 +293,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
                     <h3 className="font-black text-base text-slate-900">{item.name}</h3>
                     <p className="text-slate-500 text-[11px]">{item.location?.address || item.city}</p>
                   </div>
-                  <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-brand-50 text-brand-700">
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700">
                     {item.selectedRoom?.name || 'Deluxe Room'}
                   </span>
                 </div>
@@ -321,7 +319,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
           {isPackage && (
             <div className="space-y-3">
               <h2 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                <Palmtree className="h-4 w-4 text-brand-600" />
+                <Palmtree className="h-4 w-4 text-indigo-600" />
                 Tour Package Voucher
               </h2>
               <div className="border border-slate-200 rounded-2xl p-4 bg-white space-y-2 text-xs">
@@ -362,7 +360,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
             {/* Total Fare */}
             <div className="text-left sm:text-right space-y-1">
               <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Total Fare Paid</span>
-              <p className="text-2xl font-black text-brand-600">
+              <p className="text-2xl font-black text-indigo-600">
                 {formatCurrency(booking.totalPrice, currency, exchangeRates)}
               </p>
               <span className="text-[10px] text-slate-400 block">
@@ -375,12 +373,12 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="space-y-1 text-center sm:text-left">
               <span className="text-[9px] uppercase font-bold tracking-widest text-slate-400 block">
-                Airline Boarding Security Barcode
+                Security Barcode &amp; Passenger Verification
               </span>
               <div className="h-9 flex items-center gap-[2px] justify-center sm:justify-start py-1">
-                {/* CSS Barcode Lines */}
                 {[2, 1, 3, 1, 4, 2, 1, 3, 2, 4, 1, 2, 3, 1, 2, 4, 2, 1, 3, 2, 1, 4, 3, 1, 2, 4, 1, 3, 2, 1, 3, 4, 2, 1, 2, 3, 1, 4, 2].map((w, idx) => (
                   <span
+                    // eslint-disable-next-line react/no-array-index-key
                     key={idx}
                     className="h-full bg-slate-900 inline-block"
                     style={{ width: `${w}px` }}
@@ -393,8 +391,8 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
             </div>
 
             <div className="text-center sm:text-right text-[10px] text-slate-400 max-w-xs">
-              <p className="font-semibold text-slate-700">Scan at Terminal Gate</p>
-              <p>Keep this document easily accessible on your mobile phone or as a printed paper copy.</p>
+              <p className="font-semibold text-slate-700">Official Platform Travel Voucher</p>
+              <p>Generated by Admin Console directly from verified database reservation record.</p>
             </div>
           </div>
 

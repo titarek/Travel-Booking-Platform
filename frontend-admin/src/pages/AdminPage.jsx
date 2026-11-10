@@ -34,6 +34,9 @@ import {
   ExternalLink,
   XCircle,
   MapPin,
+  Tag,
+  Ticket,
+  Edit3,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
@@ -42,6 +45,7 @@ import { Badge } from '../components/ui/Badge.jsx';
 import { Modal } from '../components/ui/Modal.jsx';
 import { Input } from '../components/ui/Input.jsx';
 import { AdminLoginForm } from '../components/auth/AdminLoginForm.jsx';
+import { ETicketModal } from '../components/booking/ETicketModal.jsx';
 import api from '../api/axios.js';
 
 // Helper to export tabular data as CSV for SaaS reporting
@@ -84,6 +88,7 @@ export const AdminPage = () => {
   const [hotels, setHotels] = useState([]);
   const [flights, setFlights] = useState([]);
   const [packages, setPackages] = useState([]);
+  const [offers, setOffers] = useState([]);
   const [users, setUsers] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [systemHealth, setSystemHealth] = useState(null);
@@ -117,13 +122,34 @@ export const AdminPage = () => {
   const [hotelSearch, setHotelSearch] = useState('');
   const [flightSearch, setFlightSearch] = useState('');
   const [packageSearch, setPackageSearch] = useState('');
+  const [offerSearch, setOfferSearch] = useState('');
+  const [offerCategoryFilter, setOfferCategoryFilter] = useState('all');
   const [auditSearch, setAuditSearch] = useState('');
 
   // Modals state
   const [hotelModalOpen, setHotelModalOpen] = useState(false);
   const [flightModalOpen, setFlightModalOpen] = useState(false);
   const [packageModalOpen, setPackageModalOpen] = useState(false);
+  const [offerModalOpen, setOfferModalOpen] = useState(false);
+  const [editingOffer, setEditingOffer] = useState(null);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [selectedTicketBooking, setSelectedTicketBooking] = useState(null);
+
+  const [offerFormData, setOfferFormData] = useState({
+    title: '',
+    subtitle: '',
+    tag: '',
+    category: 'special_offer',
+    discount: '',
+    promoCode: '',
+    buttonText: 'Book Now',
+    link: '/flights',
+    gradient: 'from-brand-600 to-sky-700',
+    features: '',
+    validUntil: 'Valid until Dec 2026',
+    active: true,
+    order: 0,
+  });
 
   // Deletion prompt modal with mandatory reason
   const [deleteModal, setDeleteModal] = useState({
@@ -231,6 +257,7 @@ export const AdminPage = () => {
         hotelsRes,
         flightsRes,
         packagesRes,
+        offersRes,
         usersRes,
         logsRes,
         healthRes,
@@ -242,6 +269,7 @@ export const AdminPage = () => {
         api.get('/admin/hotels'),
         api.get('/admin/flights'),
         api.get('/admin/packages'),
+        api.get('/admin/offers'),
         api.get('/admin/users'),
         api.get('/admin/logs'),
         api.get('/admin/system/health'),
@@ -263,6 +291,9 @@ export const AdminPage = () => {
       }
       if (packagesRes.status === 'fulfilled' && packagesRes.value.data?.data) {
         setPackages(packagesRes.value.data.data);
+      }
+      if (offersRes.status === 'fulfilled' && offersRes.value.data?.data) {
+        setOffers(offersRes.value.data.data);
       }
       if (usersRes.status === 'fulfilled' && usersRes.value.data?.data) {
         setUsers(usersRes.value.data.data);
@@ -819,6 +850,7 @@ export const AdminPage = () => {
       else if (deleteModal.type === 'flight') endpoint = 'flights';
       else if (deleteModal.type === 'package') endpoint = 'packages';
       else if (deleteModal.type === 'booking') endpoint = 'bookings';
+      else if (deleteModal.type === 'offer') endpoint = 'offers';
 
       const res = await api.delete(`/admin/${endpoint}/${deleteModal.id}`, {
         data: { reason: trimmedReason },
@@ -833,6 +865,8 @@ export const AdminPage = () => {
           setPackages((prev) => prev.filter((p) => p._id !== deleteModal.id));
         } else if (deleteModal.type === 'booking') {
           setBookings((prev) => prev.filter((b) => b._id !== deleteModal.id));
+        } else if (deleteModal.type === 'offer') {
+          setOffers((prev) => prev.filter((o) => (o._id || o.id) !== deleteModal.id));
         }
 
         // Add to audit trail log locally
@@ -862,6 +896,93 @@ export const AdminPage = () => {
     } catch {
       showToast('Failed to complete deletion.', 'error');
       setDeleteModal((prev) => ({ ...prev, submitting: false }));
+    }
+  };
+
+  // Offer management handlers
+  const handleOpenCreateOfferModal = () => {
+    setEditingOffer(null);
+    setOfferFormData({
+      title: '',
+      subtitle: '',
+      tag: '',
+      category: 'special_offer',
+      discount: '',
+      promoCode: '',
+      buttonText: 'Book Now',
+      link: '/flights',
+      gradient: 'from-brand-600 to-sky-700',
+      features: '',
+      validUntil: 'Valid until Dec 2026',
+      active: true,
+      order: 0,
+    });
+    setOfferModalOpen(true);
+  };
+
+  const handleOpenEditOfferModal = (offer) => {
+    setEditingOffer(offer);
+    setOfferFormData({
+      title: offer.title || '',
+      subtitle: offer.subtitle || '',
+      tag: offer.tag || '',
+      category: offer.category || 'special_offer',
+      discount: offer.discount || '',
+      promoCode: offer.promoCode || '',
+      buttonText: offer.buttonText || 'Book Now',
+      link: offer.link || '',
+      gradient: offer.gradient || 'from-brand-600 to-sky-700',
+      features: Array.isArray(offer.features) ? offer.features.join('\n') : (offer.features || ''),
+      validUntil: offer.validUntil || 'Valid until Dec 2026',
+      active: offer.active !== false,
+      order: offer.order || 0,
+    });
+    setOfferModalOpen(true);
+  };
+
+  const handleSaveOffer = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        ...offerFormData,
+        features: typeof offerFormData.features === 'string'
+          ? offerFormData.features.split('\n').map((s) => s.trim()).filter(Boolean)
+          : offerFormData.features,
+      };
+
+      if (editingOffer) {
+        const offerId = editingOffer._id || editingOffer.id;
+        const res = await api.put(`/admin/offers/${offerId}`, payload);
+        if (res.data?.success) {
+          setOffers((prev) => prev.map((o) => ((o._id || o.id) === offerId ? res.data.data : o)));
+          setOfferModalOpen(false);
+          showToast(`Offer "${offerFormData.title}" updated successfully.`);
+        }
+      } else {
+        const res = await api.post('/admin/offers', payload);
+        if (res.data?.success) {
+          setOffers((prev) => [res.data.data, ...prev]);
+          setOfferModalOpen(false);
+          showToast(`New offer "${offerFormData.title}" published.`);
+        }
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to save offer.', 'error');
+    }
+  };
+
+  const handleToggleOfferActive = async (offer) => {
+    try {
+      const offerId = offer._id || offer.id;
+      const res = await api.put(`/admin/offers/${offerId}`, {
+        active: !offer.active,
+      });
+      if (res.data?.success) {
+        setOffers((prev) => prev.map((o) => ((o._id || o.id) === offerId ? { ...o, active: !offer.active } : o)));
+        showToast(`Offer "${offer.title}" ${!offer.active ? 'activated' : 'deactivated'}.`);
+      }
+    } catch {
+      showToast('Could not update offer status.', 'error');
     }
   };
 
@@ -987,6 +1108,19 @@ export const AdminPage = () => {
 
   const commissionEarned = Math.round(((stats?.totalRevenue || 0) * (settings.commissionRate || 5.0)) / 100);
 
+  const filteredOffers = offers.filter((o) => {
+    if (offerCategoryFilter !== 'all' && o.category !== offerCategoryFilter) return false;
+    if (!offerSearch.trim()) return true;
+    const q = offerSearch.toLowerCase();
+    return (
+      (o.title || '').toLowerCase().includes(q)
+      || (o.promoCode || '').toLowerCase().includes(q)
+      || (o.tag || '').toLowerCase().includes(q)
+      || (o.discount || '').toLowerCase().includes(q)
+      || (o.subtitle || '').toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col lg:flex-row font-sans">
       {/* Floating Notification */}
@@ -1052,6 +1186,7 @@ export const AdminPage = () => {
                   { id: 'hotels', label: `Hotels (${hotels.length})`, icon: Building2 },
                   { id: 'flights', label: `Flights (${flights.length})`, icon: Plane },
                   { id: 'packages', label: `Packages (${packages.length})`, icon: PackageIcon },
+                  { id: 'offers', label: `Offers & Promos (${offers.length})`, icon: Tag },
                 ].map((item) => {
                   const Icon = item.icon;
                   const active = activeTab === item.id;
@@ -1434,14 +1569,24 @@ export const AdminPage = () => {
                           </Badge>
                         </td>
                         <td className="py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedInvoice(b)}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 text-indigo-600 transition-colors"
-                            title="View Receipt"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTicketBooking(b)}
+                              className="p-1.5 rounded-lg hover:bg-slate-100 text-indigo-600 transition-colors"
+                              title="View Customer E-Ticket Voucher"
+                            >
+                              <Ticket className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedInvoice(b)}
+                              className="p-1.5 rounded-lg hover:bg-slate-100 text-indigo-600 transition-colors"
+                              title="View Receipt"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1584,6 +1729,14 @@ export const AdminPage = () => {
                           </td>
                           <td className="py-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedTicketBooking(b)}
+                                className="p-1.5 rounded-lg hover:bg-slate-100 text-indigo-600 transition-colors"
+                                title="View Customer E-Ticket Voucher"
+                              >
+                                <Ticket className="h-4 w-4" />
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => setSelectedInvoice(b)}
@@ -1936,6 +2089,196 @@ export const AdminPage = () => {
                 </div>
               ))}
             </div>
+          </div>
+          )}
+
+          {/* TAB: OFFERS & PROMOTIONAL CAMPAIGNS */}
+          {activeTab === 'offers' && (
+          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-black text-slate-900">Offers, Promos &amp; Bank Partnerships</h2>
+                <p className="text-xs text-slate-500">
+                  Manage homepage promotional cards, bank cardholder privileges, and discount campaigns.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative">
+                  <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    value={offerSearch}
+                    onChange={(e) => setOfferSearch(e.target.value)}
+                    placeholder="Search by title, promo code, or tag..."
+                    className="w-full sm:w-64 pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'special_offer', label: 'Special Promos' },
+                    { id: 'bank_partner', label: 'Bank Partners' },
+                  ].map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setOfferCategoryFilter(cat.id)}
+                      className={`px-3 py-1.5 rounded-lg transition-all ${
+                        offerCategoryFilter === cat.id
+                          ? 'bg-white text-indigo-600 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={handleOpenCreateOfferModal}
+                  className="rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20 flex items-center gap-1.5"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add New Offer</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Filtered offers grid */}
+            {filteredOffers.length === 0 ? (
+              <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-2xl space-y-3">
+                <Tag className="h-10 w-10 text-slate-300 mx-auto" />
+                <p className="text-sm font-bold text-slate-700">No offers found</p>
+                <p className="text-xs text-slate-400">Try adjusting your search criteria or create a new promotional offer.</p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleOpenCreateOfferModal}
+                  className="rounded-xl font-bold text-xs"
+                >
+                  Create First Offer
+                </Button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredOffers.map((offer) => {
+                  const isBank = offer.category === 'bank_partner';
+                  return (
+                    <div
+                      key={offer._id || offer.id}
+                      className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
+                    >
+                      {/* Card Preview Banner */}
+                      <div className={`p-5 bg-gradient-to-br ${offer.gradient || 'from-indigo-600 to-sky-700'} text-white relative`}>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm text-[10px] font-bold uppercase tracking-wider">
+                            {offer.tag || (isBank ? 'Bank Partner' : 'Special Promo')}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
+                              offer.active !== false ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-300'
+                            }`}
+                          >
+                            {offer.active !== false ? 'Active' : 'Draft / Inactive'}
+                          </span>
+                        </div>
+                        <h3 className="font-black text-base leading-snug line-clamp-2">{offer.title}</h3>
+                        {offer.discount && (
+                          <p className="text-xs font-bold text-amber-200 mt-1">{offer.discount}</p>
+                        )}
+                      </div>
+
+                      {/* Card Content & Metadata */}
+                      <div className="p-4 space-y-3 flex-1 flex flex-col justify-between text-xs">
+                        <div className="space-y-2">
+                          <p className="text-slate-600 line-clamp-2 text-[11px]">{offer.subtitle}</p>
+
+                          <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl text-[10px]">
+                            <div>
+                              <span className="text-slate-400 block font-medium">Category</span>
+                              <strong className="text-slate-800 capitalize">
+                                {isBank ? 'Bank Privilege' : 'Special Promo'}
+                              </strong>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block font-medium">Promo Code</span>
+                              <strong className="font-mono text-indigo-600">
+                                {offer.promoCode || 'None (Auto)'}
+                              </strong>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block font-medium">Validity</span>
+                              <span className="text-slate-700 font-medium truncate block">
+                                {offer.validUntil || 'Ongoing'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block font-medium">Button Action</span>
+                              <span className="text-slate-700 font-medium truncate block">
+                                {offer.buttonText || 'Book Now'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {offer.link && (
+                            <p className="text-[10px] text-slate-400 font-mono truncate" title={offer.link}>
+                              Target: <span className="text-slate-600">{offer.link}</span>
+                            </p>
+                          )}
+
+                          {Array.isArray(offer.features) && offer.features.length > 0 && (
+                            <ul className="text-[10px] text-slate-500 space-y-0.5 list-disc pl-3 pt-1">
+                              {offer.features.slice(0, 3).map((feat, idx) => (
+                                <li key={idx} className="line-clamp-1">{feat}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleOfferActive(offer)}
+                            className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-colors ${
+                              offer.active !== false
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            {offer.active !== false ? 'Live on Site' : 'Paused / Hidden'}
+                          </button>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditOfferModal(offer)}
+                              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-700 hover:text-indigo-600 transition-colors"
+                              title="Edit Offer Details"
+                            >
+                              <Edit3 className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => promptDelete('offer', offer._id || offer.id, offer.title, `${isBank ? 'Bank Partner' : 'Special Offer'} - ${offer.discount || offer.tag || ''}`)}
+                              className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-600 transition-colors"
+                              title="Delete Offer (Requires Reason)"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
           )}
 
@@ -2799,6 +3142,218 @@ export const AdminPage = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* MODAL: CUSTOMER E-TICKET VOUCHER (PASSENGER VIEW) */}
+      <ETicketModal
+        booking={selectedTicketBooking}
+        isOpen={Boolean(selectedTicketBooking)}
+        onClose={() => setSelectedTicketBooking(null)}
+      />
+
+      {/* MODAL: ADD / EDIT OFFER */}
+      <Modal
+        isOpen={offerModalOpen}
+        onClose={() => setOfferModalOpen(false)}
+        title={editingOffer ? 'Edit Promotional Offer' : 'Add New Promotional Offer'}
+      >
+        <form onSubmit={handleSaveOffer} className="space-y-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="offerTitleInput" className="font-bold text-slate-800 block text-xs">
+                Offer Title <span className="text-rose-500">*</span>
+              </label>
+              <input
+                id="offerTitleInput"
+                type="text"
+                value={offerFormData.title}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, title: e.target.value }))}
+                placeholder="e.g. Flat 15% OFF on International Flights"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                required
+              />
+            </div>
+
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="offerSubtitleInput" className="font-bold text-slate-800 block text-xs">
+                Subtitle / Description <span className="text-rose-500">*</span>
+              </label>
+              <input
+                id="offerSubtitleInput"
+                type="text"
+                value={offerFormData.subtitle}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, subtitle: e.target.value }))}
+                placeholder="e.g. Book Dubai, Singapore, Bangkok or London flights and save big."
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerCategorySelect" className="font-bold text-slate-800 block text-xs">
+                Category
+              </label>
+              <select
+                id="offerCategorySelect"
+                value={offerFormData.category}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, category: e.target.value }))}
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 bg-white"
+              >
+                <option value="special_offer">Special Offer / Promo Voucher</option>
+                <option value="bank_partner">Bank Partner Privilege Card</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerTagInput" className="font-bold text-slate-800 block text-xs">
+                Card Badge / Tag
+              </label>
+              <input
+                id="offerTagInput"
+                type="text"
+                value={offerFormData.tag}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, tag: e.target.value }))}
+                placeholder="e.g. Promo: TRAVEL20, Beach Escape, Co-Branded"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerDiscountInput" className="font-bold text-slate-800 block text-xs">
+                Discount Label
+              </label>
+              <input
+                id="offerDiscountInput"
+                type="text"
+                value={offerFormData.discount}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, discount: e.target.value }))}
+                placeholder="e.g. Flat 15% OFF or 2,000 Cashback"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerPromoCodeInput" className="font-bold text-slate-800 block text-xs">
+                Promo Code
+              </label>
+              <input
+                id="offerPromoCodeInput"
+                type="text"
+                value={offerFormData.promoCode}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, promoCode: e.target.value.toUpperCase() }))}
+                placeholder="e.g. TRAVEL20"
+                className="w-full p-2.5 font-mono uppercase rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerButtonTextInput" className="font-bold text-slate-800 block text-xs">
+                Button Text
+              </label>
+              <input
+                id="offerButtonTextInput"
+                type="text"
+                value={offerFormData.buttonText}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, buttonText: e.target.value }))}
+                placeholder="e.g. Book Now, View Resorts, View Details"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerLinkInput" className="font-bold text-slate-800 block text-xs">
+                Target Action Link
+              </label>
+              <input
+                id="offerLinkInput"
+                type="text"
+                value={offerFormData.link}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, link: e.target.value }))}
+                placeholder="e.g. /flights?destination=DXB or /hotels"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="offerGradientSelect" className="font-bold text-slate-800 block text-xs">
+                Card Gradient Theme
+              </label>
+              <select
+                id="offerGradientSelect"
+                value={offerFormData.gradient}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, gradient: e.target.value }))}
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 bg-white"
+              >
+                <option value="from-brand-600 to-sky-700">Flight Ocean Blue (from-brand-600 to-sky-700)</option>
+                <option value="from-amber-500 to-orange-600">Resort Sunset Amber (from-amber-500 to-orange-600)</option>
+                <option value="from-emerald-600 to-teal-700">Maldives Emerald Palm (from-emerald-600 to-teal-700)</option>
+                <option value="from-blue-700 via-indigo-700 to-slate-900">EBL Visa Deep Blue (from-blue-700 to-slate-900)</option>
+                <option value="from-pink-600 via-purple-700 to-indigo-900">bKash Ruby Magenta (from-pink-600 to-indigo-900)</option>
+                <option value="from-slate-800 via-slate-900 to-indigo-950">Amex Executive Charcoal (from-slate-800 to-indigo-950)</option>
+                <option value="from-purple-600 to-indigo-800">Royal Purple VIP (from-purple-600 to-indigo-800)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="offerFeaturesTextarea" className="font-bold text-slate-800 block text-xs">
+                Feature Highlights / Terms (one per line)
+              </label>
+              <textarea
+                id="offerFeaturesTextarea"
+                rows={3}
+                value={offerFormData.features}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, features: e.target.value }))}
+                placeholder="0% Interest EMI up to 12 Months&#10;Complimentary Balaka Executive Lounge&#10;Extra 2x TripCoins per transaction"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerValidUntilInput" className="font-bold text-slate-800 block text-xs">
+                Validity Notice
+              </label>
+              <input
+                id="offerValidUntilInput"
+                type="text"
+                value={offerFormData.validUntil}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, validUntil: e.target.value }))}
+                placeholder="e.g. Valid until Dec 2026"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 pt-6">
+              <input
+                id="offerActiveCheckbox"
+                type="checkbox"
+                checked={offerFormData.active}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, active: e.target.checked }))}
+                className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
+              />
+              <label htmlFor="offerActiveCheckbox" className="font-bold text-slate-800 text-xs cursor-pointer">
+                Publish live immediately on Customer Portal
+              </label>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOfferModalOpen(false)}
+              className="rounded-xl font-bold text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              className="rounded-xl font-bold text-xs bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20"
+            >
+              {editingOffer ? 'Save Changes' : 'Create Offer'}
+            </Button>
+          </div>
+        </form>
       </Modal>
 
       {/* MODAL: ADD HOTEL */}

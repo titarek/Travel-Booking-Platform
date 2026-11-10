@@ -30,6 +30,12 @@ import {
   updateMasterPin,
   testApiConnection,
 } from '../controllers/admin.controller.js';
+import {
+  getAdminOffers,
+  createOffer,
+  updateOffer,
+  deleteOffer,
+} from '../controllers/offer.controller.js';
 import { authenticate, authorizeAdmin } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { registerAdminClient } from '../utils/realtime.js';
@@ -131,6 +137,12 @@ router.post(
 );
 router.patch('/packages/:id', updatePackage);
 router.delete('/packages/:id', deletePackage);
+
+// Special Offers & Discount Promotions Management
+router.get('/offers', getAdminOffers);
+router.post('/offers', createOffer);
+router.patch('/offers/:id', updateOffer);
+router.delete('/offers/:id', deleteOffer);
 
 // SaaS Optimization & System Telemetry
 router.get('/system/health', getSystemHealth);

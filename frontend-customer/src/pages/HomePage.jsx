@@ -26,12 +26,43 @@ import { BankPartnersSection } from '../components/home/BankPartnersSection.jsx'
 import { TripCoinsWidget } from '../components/home/TripCoinsWidget.jsx';
 import api from '../api/axios.js';
 
+const DEFAULT_SPECIAL_OFFERS = [
+  {
+    _id: 'default-sp-1',
+    tag: 'Promo: TRAVEL20',
+    title: 'Flat 15% OFF on International Flights',
+    subtitle: 'Book Dubai, Singapore, Bangkok or London flights and save big.',
+    buttonText: 'Book Now',
+    link: '/flights?destination=DXB',
+    gradient: 'from-brand-600 to-sky-700',
+  },
+  {
+    _id: 'default-sp-2',
+    tag: 'Beach Escape',
+    title: "Up to 30% OFF on Cox's Bazar Resorts",
+    subtitle: 'Complimentary buffet breakfast, pool access, and ocean views.',
+    buttonText: 'View Resorts',
+    link: "/hotels?city=Cox's+Bazar",
+    gradient: 'from-amber-500 to-orange-600',
+  },
+  {
+    _id: 'default-sp-3',
+    tag: 'Island Holiday',
+    title: 'Maldives Overwater Luxury Getaway',
+    subtitle: 'Speedboat airport transfer, snorkeling, and sunset cruise included.',
+    buttonText: 'Explore Packages',
+    link: '/packages?destination=Maldives',
+    gradient: 'from-emerald-600 to-teal-700',
+  },
+];
+
 export const HomePage = () => {
   const navigate = useNavigate();
 
   const [popularFlights, setPopularFlights] = useState([]);
   const [featuredHotels, setFeaturedHotels] = useState([]);
   const [featuredPackages, setFeaturedPackages] = useState([]);
+  const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Modal states for preview & booking
@@ -52,10 +83,11 @@ export const HomePage = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [flightsRes, hotelsRes, packagesRes] = await Promise.allSettled([
+        const [flightsRes, hotelsRes, packagesRes, offersRes] = await Promise.allSettled([
           api.get('/flights/popular'),
           api.get('/hotels/featured'),
           api.get('/packages/featured'),
+          api.get('/offers'),
         ]);
 
         if (flightsRes.status === 'fulfilled' && flightsRes.value.data?.data) {
@@ -66,6 +98,9 @@ export const HomePage = () => {
         }
         if (packagesRes.status === 'fulfilled' && packagesRes.value.data?.data) {
           setFeaturedPackages(packagesRes.value.data.data.slice(0, 3));
+        }
+        if (offersRes.status === 'fulfilled' && Array.isArray(offersRes.value.data?.data)) {
+          setOffers(offersRes.value.data.data);
         }
       } catch (e) {
         console.error('Home page data error:', e);
@@ -95,6 +130,10 @@ export const HomePage = () => {
     setBookingModalOpen(true);
   };
 
+  const specialOffers = offers.filter((o) => o.category !== 'bank_partner' && o.active !== false);
+  const bankPartnerOffers = offers.filter((o) => o.category === 'bank_partner' && o.active !== false);
+  const displaySpecialOffers = specialOffers.length > 0 ? specialOffers : DEFAULT_SPECIAL_OFFERS;
+
   return (
     <div className="min-h-screen space-y-16 pb-16">
       {/* 1. Hero Search Section */}
@@ -111,70 +150,62 @@ export const HomePage = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="p-6 rounded-3xl bg-gradient-to-br from-brand-600 to-sky-700 text-white relative overflow-hidden shadow-lg group">
-              <div className="relative z-10 space-y-3">
-                <span className="px-2.5 py-1 bg-white/20 backdrop-blur-md rounded-lg text-xs font-bold uppercase tracking-wider">
-                  Promo: TRAVEL20
-                </span>
-                <h3 className="text-xl font-black leading-snug">Flat 15% OFF on International Flights</h3>
-                <p className="text-xs text-sky-100">Book Dubai, Singapore, Bangkok or London flights and save big.</p>
-                <Button
-                  size="sm"
-                  variant="white"
-                  onClick={() => navigate('/flights?destination=DXB')}
-                  className="text-brand-600 hover:text-brand-700 font-extrabold px-4 py-2 rounded-xl shadow-md flex items-center gap-1.5"
-                >
-                  <span>Book Now</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-              <Plane className="absolute -bottom-6 -right-6 h-36 w-36 text-white/10 group-hover:scale-110 transition-transform" />
-            </div>
+            {displaySpecialOffers.map((offer) => {
+              const bgGradient = offer.gradient
+                ? (offer.gradient.includes('gradient') ? offer.gradient : `bg-gradient-to-br ${offer.gradient}`)
+                : 'bg-gradient-to-br from-brand-600 to-sky-700';
 
-            <div className="p-6 rounded-3xl bg-gradient-to-br from-amber-500 to-orange-600 text-white relative overflow-hidden shadow-lg group">
-              <div className="relative z-10 space-y-3">
-                <span className="px-2.5 py-1 bg-white/20 backdrop-blur-md rounded-lg text-xs font-bold uppercase tracking-wider">
-                  Beach Escape
-                </span>
-                <h3 className="text-xl font-black leading-snug">Up to 30% OFF on Cox&apos;s Bazar Resorts</h3>
-                <p className="text-xs text-orange-100">Complimentary buffet breakfast, pool access, and ocean views.</p>
-                <Button
-                  size="sm"
-                  variant="white"
-                  onClick={() => navigate('/hotels?city=Cox%27s+Bazar')}
-                  className="text-orange-600 hover:text-orange-700 font-extrabold px-4 py-2 rounded-xl shadow-md flex items-center gap-1.5"
-                >
-                  <span>View Resorts</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-              <Building2 className="absolute -bottom-6 -right-6 h-36 w-36 text-white/10 group-hover:scale-110 transition-transform" />
-            </div>
+              const link = (offer.link || '').toLowerCase();
+              const cat = (offer.category || '').toLowerCase();
+              const isFlightOffer = link.includes('flight') || cat.includes('flight');
+              const isHotelOffer = link.includes('hotel') || cat.includes('hotel');
 
-            <div className="p-6 rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white relative overflow-hidden shadow-lg group">
-              <div className="relative z-10 space-y-3">
-                <span className="px-2.5 py-1 bg-white/20 backdrop-blur-md rounded-lg text-xs font-bold uppercase tracking-wider">
-                  Island Holiday
-                </span>
-                <h3 className="text-xl font-black leading-snug">Maldives Overwater Luxury Getaway</h3>
-                <p className="text-xs text-emerald-100">Speedboat airport transfer, snorkeling, and sunset cruise included.</p>
-                <Button
-                  size="sm"
-                  variant="white"
-                  onClick={() => navigate('/packages?destination=Maldives')}
-                  className="text-emerald-700 hover:text-emerald-800 font-extrabold px-4 py-2 rounded-xl shadow-md flex items-center gap-1.5"
+              return (
+                <div
+                  key={offer._id || offer.id}
+                  className={`p-6 rounded-3xl ${bgGradient} text-white relative overflow-hidden shadow-lg group`}
                 >
-                  <span>Explore Packages</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-              <Palmtree className="absolute -bottom-6 -right-6 h-36 w-36 text-white/10 group-hover:scale-110 transition-transform" />
-            </div>
+                  <div className="relative z-10 space-y-3">
+                    {offer.tag && (
+                      <span className="px-2.5 py-1 bg-white/20 backdrop-blur-md rounded-lg text-xs font-bold uppercase tracking-wider inline-block">
+                        {offer.tag}
+                      </span>
+                    )}
+                    <h3 className="text-xl font-black leading-snug">{offer.title}</h3>
+                    <p className="text-xs text-white/90 line-clamp-2">{offer.subtitle}</p>
+                    <Button
+                      size="sm"
+                      variant="white"
+                      onClick={() => {
+                        if (offer.link) {
+                          if (offer.link.startsWith('http')) {
+                            window.open(offer.link, '_blank');
+                          } else {
+                            navigate(offer.link);
+                          }
+                        }
+                      }}
+                      className="text-slate-900 hover:text-black font-extrabold px-4 py-2 rounded-xl shadow-md flex items-center gap-1.5"
+                    >
+                      <span>{offer.buttonText || 'Explore Now'}</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  {isFlightOffer ? (
+                    <Plane className="absolute -bottom-6 -right-6 h-36 w-36 text-white/10 group-hover:scale-110 transition-transform" />
+                  ) : isHotelOffer ? (
+                    <Building2 className="absolute -bottom-6 -right-6 h-36 w-36 text-white/10 group-hover:scale-110 transition-transform" />
+                  ) : (
+                    <Palmtree className="absolute -bottom-6 -right-6 h-36 w-36 text-white/10 group-hover:scale-110 transition-transform" />
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
 
         {/* Bank Partner & Lifestyle Card Promotions (ShareTrip Signature Feature) */}
-        <BankPartnersSection />
+        <BankPartnersSection offers={bankPartnerOffers} />
 
         {/* 3. Popular Flight Fares */}
         <section className="space-y-6">
