@@ -74,8 +74,22 @@ export const AdminPage = () => {
   } = useAuth();
 
   const [activeTab, setActiveTab] = useState('overview');
-  const [stats, setStats] = useState(null);
-  const [bookings, setBookings] = useState([]);
+  const [stats, setStats] = useState(() => {
+    try {
+      const cached = localStorage.getItem('travel_admin_cached_stats');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [bookings, setBookings] = useState(() => {
+    try {
+      const cached = localStorage.getItem('travel_admin_cached_bookings');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
   const [recentNewOrderId, setRecentNewOrderId] = useState(null);
   const [hotels, setHotels] = useState([]);
   const [flights, setFlights] = useState([]);
@@ -221,9 +235,35 @@ export const AdminPage = () => {
   const fetchAdminData = useCallback(async () => {
     try {
       setRefreshing(true);
+
+      // Phase 1: Rapid Overview Unblock (Fetch Critical Stats & Bookings First)
+      const [statsRes, bookingsRes] = await Promise.allSettled([
+        api.get('/admin/stats'),
+        api.get('/admin/bookings'),
+      ]);
+
+      if (statsRes.status === 'fulfilled' && statsRes.value.data?.data) {
+        setStats(statsRes.value.data.data);
+        try {
+          localStorage.setItem('travel_admin_cached_stats', JSON.stringify(statsRes.value.data.data));
+        } catch {
+          // ignore cache errors
+        }
+      }
+      if (bookingsRes.status === 'fulfilled' && bookingsRes.value.data?.data) {
+        setBookings(bookingsRes.value.data.data);
+        try {
+          localStorage.setItem('travel_admin_cached_bookings', JSON.stringify(bookingsRes.value.data.data));
+        } catch {
+          // ignore cache errors
+        }
+      }
+
+      // Unblock loading screen immediately once overview metrics arrive
+      setLoading(false);
+
+      // Phase 2: Deferred Concurrent Fetch for catalogs and ancillary tabs
       const [
-        statsRes,
-        bookingsRes,
         hotelsRes,
         flightsRes,
         packagesRes,
@@ -233,8 +273,6 @@ export const AdminPage = () => {
         settingsRes,
         apiKeysRes,
       ] = await Promise.allSettled([
-        api.get('/admin/stats'),
-        api.get('/admin/bookings'),
         api.get('/admin/hotels'),
         api.get('/admin/flights'),
         api.get('/admin/packages'),
@@ -245,12 +283,6 @@ export const AdminPage = () => {
         api.get('/admin/api-keys'),
       ]);
 
-      if (statsRes.status === 'fulfilled' && statsRes.value.data?.data) {
-        setStats(statsRes.value.data.data);
-      }
-      if (bookingsRes.status === 'fulfilled' && bookingsRes.value.data?.data) {
-        setBookings(bookingsRes.value.data.data);
-      }
       if (hotelsRes.status === 'fulfilled' && hotelsRes.value.data?.data) {
         setHotels(hotelsRes.value.data.data);
       }
@@ -1018,9 +1050,16 @@ export const AdminPage = () => {
   if (loading && !stats) {
     return (
       <div className="min-h-[80vh] flex items-center justify-center py-16 px-4">
-        <div className="flex flex-col items-center gap-3 text-slate-500">
-          <RefreshCw className="h-8 w-8 animate-spin text-indigo-600" />
-          <p className="text-xs font-bold uppercase tracking-wider">Loading Platform Facilities...</p>
+        <div className="flex flex-col items-center gap-3.5 text-center max-w-sm">
+          <RefreshCw className="h-8 w-8 animate-spin text-indigo-500" />
+          <div className="space-y-1">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-200">
+              Connecting to Travel Cloud...
+            </p>
+            <p className="text-[11px] text-slate-500">
+              Synchronizing administrative metrics. Waking server if idle.
+            </p>
+          </div>
         </div>
       </div>
     );
