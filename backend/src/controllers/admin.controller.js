@@ -939,9 +939,16 @@ export const deleteFlight = async (req, res, next) => {
 export const getAdminUsers = async (req, res, next) => {
   try {
     if (isDbConnected()) {
-      const resUsers = await query(
-        'SELECT id, id as "_id", name, email, role, phone, created_at as "createdAt" FROM users ORDER BY created_at DESC',
-      );
+      let resUsers;
+      try {
+        resUsers = await query(
+          'SELECT id, id as "_id", name, email, role, phone, wallet_balance as "walletBalance", created_at as "createdAt" FROM users ORDER BY created_at DESC',
+        );
+      } catch {
+        resUsers = await query(
+          'SELECT id, id as "_id", name, email, role, created_at as "createdAt" FROM users ORDER BY created_at DESC',
+        );
+      }
       return res.status(200).json({ success: true, count: resUsers.rows.length, data: resUsers.rows });
     }
 

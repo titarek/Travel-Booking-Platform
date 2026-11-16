@@ -38,15 +38,25 @@ export const authenticate = async (req, res, next) => {
     // Lookup user in PostgreSQL, MongoDB, or resilient MemoryStore
     let user = null;
     if (isDbConnected()) {
-      const result = await query(
-        'SELECT id, name, email, role, phone, wallet_balance, created_at, updated_at FROM users WHERE id = $1',
-        [decoded.id],
-      );
+      let result;
+      try {
+        result = await query(
+          'SELECT id, name, email, role, phone, wallet_balance, created_at, updated_at FROM users WHERE id = $1',
+          [decoded.id],
+        );
+      } catch (colErr) {
+        console.warn(`[authMiddleware] Extended user query failed (${colErr.message}), falling back`);
+        result = await query(
+          'SELECT id, name, email, role, created_at, updated_at FROM users WHERE id = $1',
+          [decoded.id],
+        );
+      }
       if (result.rows.length > 0) {
         const row = result.rows[0];
         user = {
           ...row,
           _id: row.id,
+          phone: row.phone || '',
           role: (row.role || 'CUSTOMER').toUpperCase(),
           walletBalance: Number(row.wallet_balance != null ? row.wallet_balance : 1000),
         };

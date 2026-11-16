@@ -64,6 +64,7 @@ export const runMigrations = async () => {
       phone VARCHAR(50) DEFAULT '',
       security_question VARCHAR(255) DEFAULT '',
       security_answer_hash VARCHAR(255) DEFAULT '',
+      wallet_balance NUMERIC DEFAULT 1000,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -150,12 +151,42 @@ export const runMigrations = async () => {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-    CREATE INDEX IF NOT EXISTS idx_bookings_user_id ON bookings(user_id);
-    CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
-    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE TABLE IF NOT EXISTS wallet_transactions (
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL,
+      type VARCHAR(50) NOT NULL,
+      amount NUMERIC(10,2) NOT NULL,
+      balance_before NUMERIC(10,2) NOT NULL,
+      balance_after NUMERIC(10,2) NOT NULL,
+      payment_method VARCHAR(100),
+      reference_id VARCHAR(100),
+      description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `;
 
   await pool.query(ddl);
+
+  // Column and index migrations for existing databases
+  const migrationDdl = `
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(50) DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS security_question VARCHAR(255) DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS security_answer_hash VARCHAR(255) DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC DEFAULT 1000;
+    UPDATE users SET wallet_balance = 1000 WHERE wallet_balance IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_bookings_user_id ON bookings(user_id);
+    CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_wallet_tx_user_id ON wallet_transactions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_wallet_tx_created_at ON wallet_transactions(created_at DESC);
+  `;
+
+  try {
+    await pool.query(migrationDdl);
+  } catch (migErr) {
+    console.warn(`[Migration Warning] ${migErr.message}`);
+  }
+
   console.log('✓ PostgreSQL Schema Migrations verified successfully.');
 };
 

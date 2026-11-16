@@ -42,21 +42,32 @@ export const register = async (req, res, next) => {
         });
       }
 
-      const insertRes = await query(
-        `INSERT INTO users (id, name, email, password_hash, role, phone, security_question, security_answer_hash)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING id, name, email, role, phone, created_at`,
-        [
-          id,
-          name,
-          normalizedEmail,
-          passwordHash,
-          'CUSTOMER',
-          phone || '',
-          securityQuestion || '',
-          securityAnswerHash,
-        ],
-      );
+      let insertRes;
+      try {
+        insertRes = await query(
+          `INSERT INTO users (id, name, email, password_hash, role, phone, security_question, security_answer_hash, wallet_balance)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1000)
+           RETURNING id, name, email, role, phone, wallet_balance, created_at`,
+          [
+            id,
+            name,
+            normalizedEmail,
+            passwordHash,
+            'CUSTOMER',
+            phone || '',
+            securityQuestion || '',
+            securityAnswerHash,
+          ],
+        );
+      } catch (insErr) {
+        console.warn(`[Auth Register] Full insert failed (${insErr.message}), falling back to core insert`);
+        insertRes = await query(
+          `INSERT INTO users (id, name, email, password_hash, role)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING id, name, email, role, created_at`,
+          [id, name, normalizedEmail, passwordHash, 'CUSTOMER'],
+        );
+      }
 
       const createdUser = insertRes.rows[0];
       const token = generateToken(createdUser);
@@ -70,7 +81,7 @@ export const register = async (req, res, next) => {
           _id: createdUser.id,
           name: createdUser.name,
           email: createdUser.email,
-          phone: createdUser.phone,
+          phone: createdUser.phone || '',
           role: 'CUSTOMER',
           walletBalance: 1000,
         },
@@ -174,11 +185,21 @@ export const login = async (req, res, next) => {
 
     // 1. PostgreSQL Persistent Lookup
     if (isDbConnected()) {
-      const result = await query(
-        `SELECT id, name, email, password_hash, role, phone, wallet_balance, security_question, created_at
-         FROM users WHERE LOWER(email) = LOWER($1)`,
-        [normalizedEmail],
-      );
+      let result;
+      try {
+        result = await query(
+          `SELECT id, name, email, password_hash, role, phone, wallet_balance, security_question, created_at
+           FROM users WHERE LOWER(email) = LOWER($1)`,
+          [normalizedEmail],
+        );
+      } catch (colErr) {
+        console.warn(`[Auth Login] Full query failed (${colErr.message}), falling back to core columns`);
+        result = await query(
+          `SELECT id, name, email, password_hash, role, created_at
+           FROM users WHERE LOWER(email) = LOWER($1)`,
+          [normalizedEmail],
+        );
+      }
 
       if (result.rows.length > 0) {
         const row = result.rows[0];
@@ -188,7 +209,7 @@ export const login = async (req, res, next) => {
           _id: row.id,
           name: row.name,
           email: row.email,
-          phone: row.phone,
+          phone: row.phone || '',
           role: (row.role || 'CUSTOMER').toUpperCase(),
           walletBalance: Number(row.wallet_balance != null ? row.wallet_balance : 1000),
           createdAt: row.created_at,
@@ -298,9 +319,14 @@ export const getSecurityQuestion = async (req, res, next) => {
     let securityQuestion = null;
 
     if (isDbConnected()) {
-      const resPg = await query('SELECT security_question FROM users WHERE LOWER(email) = LOWER($1)', [normalizedEmail]);
-      if (resPg.rows.length > 0) {
-        securityQuestion = resPg.rows[0].security_question;
+      try {
+        const resPg = await query('SELECT security_question FROM users WHERE LOWER(email) = LOWER($1)', [normalizedEmail]);
+        if (resPg.rows.length > 0) {
+          securityQuestion = resPg.rows[0].security_question;
+        }
+      } catch (colErr) {
+        console.warn(`[getSecurityQuestion] Query failed (${colErr.message}), falling back`);
+        securityQuestion = '';
       }
     } else if (mongoose.connection.readyState === 1) {
       const u = await User.findOne({ email: normalizedEmail });
@@ -359,14 +385,19 @@ export const resetPasswordWithSecurityAnswer = async (req, res, next) => {
     let securityAnswerHash = null;
 
     if (isDbConnected()) {
-      const resPg = await query(
-        'SELECT id, security_answer_hash FROM users WHERE LOWER(email) = LOWER($1)',
-        [normalizedEmail],
-      );
-      if (resPg.rows.length === 0) {
-        return res.status(404).json({ success: false, message: 'No account found with this email address.' });
+      try {
+        const resPg = await query(
+          'SELECT id, security_answer_hash FROM users WHERE LOWER(email) = LOWER($1)',
+          [normalizedEmail],
+        );
+        if (resPg.rows.length === 0) {
+          return res.status(404).json({ success: false, message: 'No account found with this email address.' });
+        }
+        securityAnswerHash = resPg.rows[0].security_answer_hash;
+      } catch (colErr) {
+        console.warn(`[resetPasswordWithSecurityAnswer] Query failed (${colErr.message})`);
+        securityAnswerHash = null;
       }
-      securityAnswerHash = resPg.rows[0].security_answer_hash;
     } else if (mongoose.connection.readyState === 1) {
       const u = await User.findOne({ email: normalizedEmail }).select('+passwordHash +securityAnswerHash');
       if (!u) {
@@ -437,33 +468,55 @@ export const updateProfile = async (req, res, next) => {
     let updatedUser = null;
 
     if (isDbConnected()) {
-      let queryStr = 'UPDATE users SET name = COALESCE($1, name), phone = COALESCE($2, phone), security_question = COALESCE($3, security_question), updated_at = NOW()';
-      const params = [name || null, phone || null, securityQuestion || null];
+      try {
+        let queryStr = 'UPDATE users SET name = COALESCE($1, name), phone = COALESCE($2, phone), security_question = COALESCE($3, security_question), updated_at = NOW()';
+        const params = [name || null, phone || null, securityQuestion || null];
 
-      if (securityAnswerHash) {
-        queryStr += ', security_answer_hash = $4 WHERE id = $5 RETURNING id, name, email, phone, role, security_question, wallet_balance, created_at';
-        params.push(securityAnswerHash, userId);
-      } else {
-        queryStr += ' WHERE id = $4 RETURNING id, name, email, phone, role, security_question, wallet_balance, created_at';
-        params.push(userId);
-      }
+        if (securityAnswerHash) {
+          queryStr += ', security_answer_hash = $4 WHERE id = $5 RETURNING id, name, email, phone, role, security_question, wallet_balance, created_at';
+          params.push(securityAnswerHash, userId);
+        } else {
+          queryStr += ' WHERE id = $4 RETURNING id, name, email, phone, role, security_question, wallet_balance, created_at';
+          params.push(userId);
+        }
 
-      const pgRes = await query(queryStr, params);
-      if (pgRes.rows.length === 0) {
-        return res.status(404).json({ success: false, message: 'User not found.' });
+        const pgRes = await query(queryStr, params);
+        if (pgRes.rows.length === 0) {
+          return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        const row = pgRes.rows[0];
+        updatedUser = {
+          id: row.id,
+          _id: row.id,
+          name: row.name,
+          email: row.email,
+          phone: row.phone,
+          role: (row.role || 'CUSTOMER').toUpperCase(),
+          securityQuestion: row.security_question,
+          walletBalance: Number(row.wallet_balance != null ? row.wallet_balance : 1000),
+          createdAt: row.created_at,
+        };
+      } catch (colErr) {
+        console.warn(`[updateProfile] Extended update failed (${colErr.message}), falling back to base columns`);
+        const fallbackRes = await query(
+          'UPDATE users SET name = COALESCE($1, name), updated_at = NOW() WHERE id = $2 RETURNING id, name, email, role, created_at',
+          [name || null, userId],
+        );
+        if (fallbackRes.rows.length === 0) {
+          return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        const row = fallbackRes.rows[0];
+        updatedUser = {
+          id: row.id,
+          _id: row.id,
+          name: row.name,
+          email: row.email,
+          phone: '',
+          role: (row.role || 'CUSTOMER').toUpperCase(),
+          walletBalance: 1000,
+          createdAt: row.created_at,
+        };
       }
-      const row = pgRes.rows[0];
-      updatedUser = {
-        id: row.id,
-        _id: row.id,
-        name: row.name,
-        email: row.email,
-        phone: row.phone,
-        role: (row.role || 'CUSTOMER').toUpperCase(),
-        securityQuestion: row.security_question,
-        walletBalance: Number(row.wallet_balance != null ? row.wallet_balance : 1000),
-        createdAt: row.created_at,
-      };
     } else if (mongoose.connection.readyState === 1) {
       const uDoc = await User.findById(userId);
       if (!uDoc) {

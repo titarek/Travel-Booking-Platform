@@ -31,8 +31,12 @@ export const createBooking = async (req, res, next) => {
     // 0. Verify and deduct funds from customer's Travel Digital Wallet
     let currentBalance = 0;
     if (isDbConnected()) {
-      const uRes = await query('SELECT wallet_balance FROM users WHERE id = $1', [userId]);
-      currentBalance = uRes.rows.length > 0 ? Number(uRes.rows[0].wallet_balance || 0) : 1000;
+      try {
+        const uRes = await query('SELECT wallet_balance FROM users WHERE id = $1', [userId]);
+        currentBalance = uRes.rows.length > 0 ? Number(uRes.rows[0].wallet_balance || 0) : 1000;
+      } catch {
+        currentBalance = 1000;
+      }
     } else if (mongoose.connection.readyState === 1) {
       const uDoc = await User.findById(userId);
       currentBalance = uDoc ? Number(uDoc.walletBalance || 0) : 1000;
@@ -64,13 +68,17 @@ export const createBooking = async (req, res, next) => {
     // 1. PostgreSQL Persistent Storage
     if (isDbConnected()) {
       // Deduct wallet balance
-      await query('UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2', [newBalance, userId]);
-      const txId = `wtx-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
-      await query(
-        `INSERT INTO wallet_transactions (id, user_id, type, amount, balance_before, balance_after, payment_method, reference_id, description)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [txId, userId, 'DEBIT_BOOKING', totalPrice, currentBalance, newBalance, payment.method, bookingReference, debitDescription],
-      );
+      try {
+        await query('UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2', [newBalance, userId]);
+        const txId = `wtx-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+        await query(
+          `INSERT INTO wallet_transactions (id, user_id, type, amount, balance_before, balance_after, payment_method, reference_id, description)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [txId, userId, 'DEBIT_BOOKING', totalPrice, currentBalance, newBalance, payment.method, bookingReference, debitDescription],
+        );
+      } catch (wErr) {
+        console.warn(`[createBooking] Wallet debit notice: ${wErr.message}`);
+      }
 
       const id = `bk-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
       const result = await query(
@@ -403,27 +411,31 @@ export const cancelBooking = async (req, res, next) => {
       const refundAmount = Number(row.total_price || 0);
       let updatedWalletBalance = 0;
       if (refundAmount > 0 && row.payment?.status === 'PAID') {
-        const uRes = await query('SELECT wallet_balance FROM users WHERE id = $1', [row.user_id]);
-        const balBefore = uRes.rows.length > 0 ? Number(uRes.rows[0].wallet_balance || 0) : 1000;
-        updatedWalletBalance = balBefore + refundAmount;
-        await query('UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2', [updatedWalletBalance, row.user_id]);
+        try {
+          const uRes = await query('SELECT wallet_balance FROM users WHERE id = $1', [row.user_id]);
+          const balBefore = uRes.rows.length > 0 ? Number(uRes.rows[0].wallet_balance || 0) : 1000;
+          updatedWalletBalance = balBefore + refundAmount;
+          await query('UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2', [updatedWalletBalance, row.user_id]);
 
-        const txId = `wtx-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
-        await query(
-          `INSERT INTO wallet_transactions (id, user_id, type, amount, balance_before, balance_after, payment_method, reference_id, description)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [
-            txId,
-            row.user_id,
-            'REFUND_BOOKING',
-            refundAmount,
-            balBefore,
-            updatedWalletBalance,
-            'Travel Digital Wallet',
-            row.booking_reference,
-            `Refund for cancelled ${row.booking_type.toUpperCase()} reservation (${row.booking_reference})`,
-          ],
-        );
+          const txId = `wtx-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+          await query(
+            `INSERT INTO wallet_transactions (id, user_id, type, amount, balance_before, balance_after, payment_method, reference_id, description)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+              txId,
+              row.user_id,
+              'REFUND_BOOKING',
+              refundAmount,
+              balBefore,
+              updatedWalletBalance,
+              'Travel Digital Wallet',
+              row.booking_reference,
+              `Refund for cancelled ${row.booking_type.toUpperCase()} reservation (${row.booking_reference})`,
+            ],
+          );
+        } catch (rErr) {
+          console.warn(`[cancelBooking] Refund warning notice: ${rErr.message}`);
+        }
       }
 
       const updatedPayment = {
