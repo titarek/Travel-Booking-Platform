@@ -61,14 +61,19 @@ export const Footer = () => {
         <div className="grid grid-cols-1 md:grid-cols-5 gap-10 py-12 border-b border-slate-800">
           {/* Brand Info */}
           <div className="md:col-span-2 space-y-4">
-            <div className="flex items-center gap-2.5">
-              <div className="h-10 w-10 rounded-xl bg-brand-500 flex items-center justify-center text-white">
+            <Link
+              to="/"
+              onClick={() => window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })}
+              className="inline-flex items-center gap-2.5 group cursor-pointer"
+              title="Travel. - Return to Homepage"
+            >
+              <div className="h-10 w-10 rounded-xl bg-brand-500 flex items-center justify-center text-white group-hover:scale-105 transition-transform">
                 <Plane className="h-5 w-5 -rotate-45" />
               </div>
-              <span className="text-2xl font-black text-white">
+              <span className="text-2xl font-black text-white group-hover:text-brand-400 transition-colors">
                 Travel<span className="text-brand-400">.</span>
               </span>
-            </div>
+            </Link>
             <p className="text-xs text-slate-400 leading-relaxed max-w-sm">
               Travel is an advanced online travel agency platform offering seamless bookings for domestic and international flights, luxury hotels, and curated holiday tour packages.
             </p>

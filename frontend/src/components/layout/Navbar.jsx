@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Plane,
   Building2,
@@ -26,6 +26,24 @@ export const Navbar = () => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [currencyMenuOpen, setCurrencyMenuOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleLogoClick = (e) => {
+    setMobileMenuOpen(false);
+    setUserMenuOpen(false);
+    setCurrencyMenuOpen(false);
+
+    // If already at homepage without search params/hash, smooth scroll to the top
+    if (location.pathname === '/' && !location.search && !location.hash) {
+      e.preventDefault();
+      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+    } else {
+      // Navigate to homepage clean root and immediately position at starting point
+      e.preventDefault();
+      navigate('/');
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    }
+  };
 
   const navLinks = [
     { name: 'Flights', path: '/flights', icon: Plane },
@@ -41,7 +59,12 @@ export const Navbar = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-20">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2.5 group">
+          <Link
+            to="/"
+            onClick={handleLogoClick}
+            className="flex items-center gap-2.5 group cursor-pointer select-none"
+            title="Travel. - Return to Homepage"
+          >
             <div className="h-11 w-11 rounded-2xl bg-gradient-to-tr from-brand-600 to-brand-400 flex items-center justify-center text-white shadow-md shadow-brand-500/25 group-hover:scale-105 transition-transform">
               <Plane className="h-6 w-6 -rotate-45" />
             </div>

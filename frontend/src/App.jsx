@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { ShieldCheck, ExternalLink } from 'lucide-react';
 import { Navbar } from './components/layout/Navbar.jsx';
@@ -10,6 +11,16 @@ import { PackagesPage } from './pages/PackagesPage.jsx';
 import { MyBookingsPage } from './pages/MyBookingsPage.jsx';
 import { AdminPage } from './pages/AdminPage.jsx';
 import { NotFoundPage } from './pages/NotFoundPage.jsx';
+
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+}
 
 export default function App() {
   const location = useLocation();
@@ -38,6 +49,7 @@ export default function App() {
   // Client Portal (Running on Port 5173)
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 selection:bg-brand-500 selection:text-white">
+      <ScrollToTop />
       {!isAdminPath && <Navbar />}
       <main className="flex-1 flex flex-col">
         <Routes>
