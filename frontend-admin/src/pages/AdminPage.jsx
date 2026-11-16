@@ -48,6 +48,7 @@ import { Modal } from '../components/ui/Modal.jsx';
 import { Input } from '../components/ui/Input.jsx';
 import { AdminLoginForm } from '../components/auth/AdminLoginForm.jsx';
 import { ETicketModal } from '../components/booking/ETicketModal.jsx';
+import { printTicket } from '../utils/printTicket.js';
 import api from '../api/axios.js';
 
 // Helper to export tabular data as CSV for SaaS reporting
@@ -3747,13 +3748,7 @@ export const AdminPage = () => {
                 type="button"
                 variant="primary"
                 onClick={() => {
-                  document.body.classList.add('printing-ticket');
-                  const cleanup = () => document.body.classList.remove('printing-ticket');
-                  window.addEventListener('afterprint', cleanup, { once: true });
-                  setTimeout(() => {
-                    window.print();
-                    setTimeout(cleanup, 2000);
-                  }, 60);
+                  printTicket('printable-e-ticket', `Travel Invoice - ${selectedInvoice.bookingReference || 'Receipt'}`);
                 }}
                 className="flex-1 py-2.5 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-700 flex items-center justify-center gap-1.5"
               >

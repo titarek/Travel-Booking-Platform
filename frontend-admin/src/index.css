@@ -88,28 +88,47 @@
     print-color-adjust: exact !important;
   }
 
-  /* When an official printable ticket voucher is active */
-  body.printing-ticket * {
-    visibility: hidden;
+  /* When an official printable ticket voucher is active (e.g. via Ctrl+P) */
+  body.printing-ticket nav,
+  body.printing-ticket header,
+  body.printing-ticket footer,
+  body.printing-ticket aside,
+  body.printing-ticket .no-print,
+  body.printing-ticket .no-print-backdrop {
+    display: none !important;
   }
 
-  body.printing-ticket #printable-e-ticket,
-  body.printing-ticket #printable-e-ticket * {
-    visibility: visible;
+  body.printing-ticket .fixed.inset-0 {
+    position: static !important;
+    overflow: visible !important;
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+  }
+
+  body.printing-ticket .no-print-container {
+    border: none !important;
+    box-shadow: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    max-height: none !important;
+    position: static !important;
+    background: #ffffff !important;
   }
 
   body.printing-ticket #printable-e-ticket {
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
+    position: static !important;
+    overflow: visible !important;
+    max-height: none !important;
     width: 100% !important;
-    max-width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
     background: #ffffff !important;
-    border: none !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
+    display: block !important;
   }
 
   @page {

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { formatCurrency, formatDate, formatTime } from '../../utils/formatters.js';
+import { printTicket } from '../../utils/printTicket.js';
 
 export const ETicketModal = ({ booking, isOpen, onClose }) => {
   const { currency, exchangeRates } = useAuth();
@@ -47,17 +48,7 @@ export const ETicketModal = ({ booking, isOpen, onClose }) => {
   const paymentStatus = (booking.payment?.status || booking.paymentStatus || 'PAID').toUpperCase();
 
   const handlePrint = () => {
-    document.body.classList.add('printing-ticket');
-    const cleanup = () => {
-      document.body.classList.remove('printing-ticket');
-      window.removeEventListener('afterprint', cleanup);
-    };
-    window.addEventListener('afterprint', cleanup);
-
-    setTimeout(() => {
-      window.print();
-      setTimeout(cleanup, 2000);
-    }, 60);
+    printTicket('printable-e-ticket', `Travel E-Ticket - ${booking.bookingReference || 'Receipt'}`);
   };
 
   const ticketNumber = `ETKT-784-${booking.bookingReference?.replace(/[^0-9]/g, '') || '482910'}-${booking._id?.slice(-4).toUpperCase() || '01'}`;
