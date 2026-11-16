@@ -6,6 +6,9 @@ import {
   Sparkles,
   Ticket,
   Printer,
+  Wallet,
+  ArrowRight,
+  Plus,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { formatCurrency } from '../../utils/formatters.js';
@@ -15,6 +18,7 @@ import { Button } from '../ui/Button.jsx';
 import { Badge } from '../ui/Badge.jsx';
 import { ETicketModal } from './ETicketModal.jsx';
 import { FlightRadarMap } from '../flights/FlightRadarMap.jsx';
+import { WalletTopUpModal } from '../wallet/WalletTopUpModal.jsx';
 import api from '../../api/axios.js';
 
 export const BookingModal = ({
@@ -24,12 +28,21 @@ export const BookingModal = ({
   onClose,
 }) => {
   const navigate = useNavigate();
-  const { user, currency, exchangeRates, openAuthModal } = useAuth();
+  const {
+    user,
+    currency,
+    exchangeRates,
+    openAuthModal,
+    walletBalance,
+    updateWalletBalance,
+    fetchWallet,
+  } = useAuth();
 
   const [step, setStep] = useState(1); // 1: Travelers, 2: Payment, 3: Confirmation
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [eTicketOpen, setETicketOpen] = useState(false);
+  const [topUpModalOpen, setTopUpModalOpen] = useState(false);
 
   // Traveler form state
   const [traveler, setTraveler] = useState({
@@ -50,7 +63,7 @@ export const BookingModal = ({
   const [promoCode, setPromoCode] = useState('');
   const [discountPercent, setDiscountPercent] = useState(0);
   const [promoMessage, setPromoMessage] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('Credit/Debit Card');
+  const paymentMethod = 'Travel Digital Wallet';
 
   // Confirmation result
   const [confirmedBooking, setConfirmedBooking] = useState(null);
@@ -80,6 +93,12 @@ export const BookingModal = ({
       return;
     }
 
+    if (walletBalance < finalPrice) {
+      setError(`Insufficient wallet balance (${formatCurrency(walletBalance, currency, exchangeRates)} available, ${formatCurrency(finalPrice, currency, exchangeRates)} required). Please top up your wallet.`);
+      setTopUpModalOpen(true);
+      return;
+    }
+
     setLoading(true);
     setError('');
 
@@ -90,12 +109,17 @@ export const BookingModal = ({
         travelers: [traveler],
         contactInfo: contact,
         totalPrice: finalPrice,
-        paymentMethod,
+        paymentMethod: paymentMethod || 'Travel Digital Wallet',
       };
 
       const res = await api.post('/bookings', payload);
       if (res.data?.data) {
         setConfirmedBooking(res.data.data);
+        if (res.data.data.walletBalance != null) {
+          updateWalletBalance(res.data.data.walletBalance);
+        } else {
+          fetchWallet();
+        }
         setStep(3); // Confirmation
       }
     } catch (err) {
@@ -326,24 +350,82 @@ export const BookingModal = ({
               )}
             </div>
 
-            {/* Payment Method Selector */}
-            <div className="space-y-3">
-              <h4 className="text-sm font-bold text-slate-900">Choose Payment Method</h4>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {['Credit/Debit Card', 'bKash / Mobile Wallet', 'Internet Banking'].map((method) => (
-                  <div
-                    key={method}
-                    onClick={() => setPaymentMethod(method)}
-                    className={`p-3 rounded-xl border text-center cursor-pointer transition-all ${
-                      paymentMethod === method
-                        ? 'border-brand-500 bg-brand-50/60 font-bold text-brand-700 shadow-sm'
-                        : 'border-slate-200 hover:border-slate-300 text-slate-700'
-                    }`}
-                  >
-                    <span className="text-xs block">{method}</span>
+            {/* Travel Digital Wallet Payment Box */}
+            <div className="p-4 rounded-2xl bg-gradient-to-tr from-brand-50 via-indigo-50/70 to-sky-50 border border-brand-200/90 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-xl bg-brand-500 text-white flex items-center justify-center shadow-xs">
+                    <Wallet className="h-4 w-4" />
                   </div>
-                ))}
+                  <div>
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                      Payment System: Travel Digital Wallet
+                    </h4>
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      All reservations deduct directly from your verified digital balance
+                    </span>
+                  </div>
+                </div>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setTopUpModalOpen(true)}
+                  className="text-xs font-bold text-brand-600 border-brand-200 bg-white hover:bg-brand-50 gap-1"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Top Up</span>
+                </Button>
               </div>
+
+              {/* Wallet Balance vs Due Comparison */}
+              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-brand-100 text-center">
+                <div className="p-2 rounded-xl bg-white/80 border border-brand-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Available</span>
+                  <span className="text-xs sm:text-sm font-black text-slate-900 block">
+                    {formatCurrency(walletBalance, currency, exchangeRates)}
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-xl bg-white/80 border border-brand-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Booking Fare</span>
+                  <span className="text-xs sm:text-sm font-black text-brand-600 block">
+                    {formatCurrency(finalPrice, currency, exchangeRates)}
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-xl bg-white/80 border border-brand-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">After Booking</span>
+                  <span className={`text-xs sm:text-sm font-black block ${
+                    walletBalance >= finalPrice ? 'text-emerald-600' : 'text-rose-600'
+                  }`}
+                  >
+                    {formatCurrency(Math.max(0, walletBalance - finalPrice), currency, exchangeRates)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Balance status alert */}
+              {walletBalance >= finalPrice ? (
+                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200/80 flex items-center gap-2 text-xs font-semibold text-emerald-800">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>Sufficient balance available: 1-click instant deduction upon confirmation.</span>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-2 text-xs font-semibold text-amber-800">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                    <span>Short by {formatCurrency(finalPrice - walletBalance, currency, exchangeRates)}. Top up required to book.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTopUpModalOpen(true)}
+                    className="underline font-bold text-brand-700 hover:text-brand-800 shrink-0"
+                  >
+                    Top up now →
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Price breakdown */}
@@ -374,14 +456,26 @@ export const BookingModal = ({
               <Button variant="outline" onClick={() => setStep(1)}>
                 Back
               </Button>
-              <Button
-                variant="accent"
-                onClick={handleCreateBooking}
-                loading={loading}
-                className="font-bold px-8 shadow-md hover:shadow-lg"
-              >
-                Pay & Confirm Booking
-              </Button>
+              {walletBalance >= finalPrice ? (
+                <Button
+                  variant="accent"
+                  onClick={handleCreateBooking}
+                  loading={loading}
+                  className="font-bold px-8 shadow-md hover:shadow-lg flex items-center gap-2"
+                >
+                  <span>Pay {formatCurrency(finalPrice, currency, exchangeRates)} & Confirm</span>
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  onClick={() => setTopUpModalOpen(true)}
+                  className="font-bold px-6 shadow-md hover:shadow-lg flex items-center gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Top Up Wallet ({formatCurrency(finalPrice - walletBalance, currency, exchangeRates)} needed)</span>
+                </Button>
+              )}
             </div>
           </div>
         )}
@@ -458,6 +552,16 @@ export const BookingModal = ({
             />
           </div>
         )}
+
+        {/* Inline Wallet Top-Up Modal */}
+        <WalletTopUpModal
+          isOpen={topUpModalOpen}
+          onClose={() => setTopUpModalOpen(false)}
+          requiredAmount={finalPrice}
+          onSuccess={() => {
+            setError('');
+          }}
+        />
       </div>
     </Modal>
   );

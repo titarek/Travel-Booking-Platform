@@ -14,6 +14,8 @@ import bookingRoutes from './routes/booking.routes.js';
 import externalRoutes from './routes/external.routes.js';
 import adminRoutes from './routes/admin.routes.js';
 import offerRoutes from './routes/offer.routes.js';
+import walletRoutes from './routes/wallet.routes.js';
+import b2bRoutes from './routes/b2b.routes.js';
 
 const app = express();
 
@@ -43,7 +45,7 @@ app.use(cors({
     return callback(new Error(`Origin ${origin} not allowed by CORS`));
   },
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
   credentials: true,
 }));
 
@@ -79,6 +81,9 @@ app.use('/api/packages', packageRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/external', externalRoutes);
 app.use('/api/offers', offerRoutes);
+app.use('/api/wallet', walletRoutes);
+app.use('/api/b2b', b2bRoutes);
+app.use('/api/v1/b2b', b2bRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler for unknown endpoints

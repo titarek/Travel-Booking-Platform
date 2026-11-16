@@ -37,6 +37,8 @@ import {
   Tag,
   Ticket,
   Edit3,
+  Globe,
+  Code,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
@@ -69,6 +71,36 @@ const exportToCSV = (filename, rows) => {
   document.body.removeChild(link);
 };
 
+const getB2BSnippet = (lang) => {
+  const { origin } = window.location;
+  if (lang === 'curl') {
+    return `curl -X GET "${origin}/api/v1/b2b/flights/search?origin=DAC&destination=DXB" \\
+  -H "x-api-key: trav_live_b2b_expedia_9a8f27c3" \\
+  -H "Content-Type: application/json"`;
+  }
+  if (lang === 'node') {
+    return `// Node.js (v18+) Programmatic B2B Integration
+const res = await fetch("${origin}/api/v1/b2b/flights/search?origin=DAC&destination=DXB", {
+  method: "GET",
+  headers: {
+    "x-api-key": "trav_live_b2b_expedia_9a8f27c3",
+    "Content-Type": "application/json"
+  }
+});
+const flights = await res.json();
+console.log("Wholesale Flight Results:", flights.data);`;
+  }
+  return `# Python (requests) Programmatic B2B Integration
+import requests
+
+url = "${origin}/api/v1/b2b/flights/search"
+params = {"origin": "DAC", "destination": "DXB"}
+headers = {"x-api-key": "trav_live_b2b_expedia_9a8f27c3"}
+
+response = requests.get(url, params=params, headers=headers)
+print("Wholesale Inventory:", response.json())`;
+};
+
 const CLIENT_PORTAL_URL = import.meta.env.VITE_CLIENT_PORTAL_URL || 'https://travel-booking-platform-u2vi.vercel.app/';
 
 export const AdminPage = () => {
@@ -89,6 +121,25 @@ export const AdminPage = () => {
   const [flights, setFlights] = useState([]);
   const [packages, setPackages] = useState([]);
   const [offers, setOffers] = useState([]);
+  const [b2bPartners, setB2bPartners] = useState([]);
+  const [b2bSettings, setB2bSettings] = useState({
+    enabled: true,
+    defaultDiscount: 8.5,
+    publicApiVersion: 'v1.0.4',
+    sandboxMode: false,
+  });
+  const [b2bSearch, setB2bSearch] = useState('');
+  const [b2bModalOpen, setB2bModalOpen] = useState(false);
+  const [b2bModalSubmitting, setB2bModalSubmitting] = useState(false);
+  const [b2bCodeTab, setB2bCodeTab] = useState('curl');
+  const [newB2BPartner, setNewB2BPartner] = useState({
+    name: '',
+    contactEmail: '',
+    tier: 'GROWTH',
+    commissionDiscount: 8.5,
+    rateLimit: 10000,
+    webhookUrl: '',
+  });
   const [users, setUsers] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [systemHealth, setSystemHealth] = useState(null);
@@ -263,6 +314,7 @@ export const AdminPage = () => {
         healthRes,
         settingsRes,
         apiKeysRes,
+        b2bRes,
       ] = await Promise.allSettled([
         api.get('/admin/stats'),
         api.get('/admin/bookings'),
@@ -275,6 +327,7 @@ export const AdminPage = () => {
         api.get('/admin/system/health'),
         api.get('/admin/settings'),
         api.get('/admin/api-keys'),
+        api.get('/b2b/admin/partners'),
       ]);
 
       if (statsRes.status === 'fulfilled' && statsRes.value.data?.data) {
@@ -309,6 +362,12 @@ export const AdminPage = () => {
       }
       if (apiKeysRes.status === 'fulfilled' && (apiKeysRes.value.data?.services || apiKeysRes.value.data?.data)) {
         setApiServices(apiKeysRes.value.data.services || apiKeysRes.value.data.data || []);
+      }
+      if (b2bRes.status === 'fulfilled' && b2bRes.value.data?.data) {
+        setB2bPartners(b2bRes.value.data.data.partners || []);
+        if (b2bRes.value.data.data.settings) {
+          setB2bSettings(b2bRes.value.data.data.settings);
+        }
       }
     } catch {
       showToast('Error syncing administrative data.', 'error');
@@ -986,6 +1045,95 @@ export const AdminPage = () => {
     }
   };
 
+  // B2B Partner Handlers
+  const handleCreateB2BPartner = async (e) => {
+    e.preventDefault();
+    if (!newB2BPartner.name || !newB2BPartner.contactEmail) {
+      showToast('Partner name and contact email are required.', 'error');
+      return;
+    }
+
+    setB2bModalSubmitting(true);
+    try {
+      const res = await api.post('/b2b/admin/partners', newB2BPartner);
+      if (res.data?.data) {
+        setB2bPartners((prev) => [res.data.data, ...prev]);
+        setB2bModalOpen(false);
+        setNewB2BPartner({
+          name: '',
+          contactEmail: '',
+          tier: 'GROWTH',
+          commissionDiscount: 8.5,
+          rateLimit: 10000,
+          webhookUrl: '',
+        });
+        showToast(`B2B Partner "${res.data.data.name}" provisioned with API Key: ${res.data.data.apiKey}`);
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to provision B2B partner.', 'error');
+    } finally {
+      setB2bModalSubmitting(false);
+    }
+  };
+
+  const handleToggleB2BStatus = async (partner) => {
+    const partnerId = partner._id || partner.id;
+    const nextStatus = partner.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
+    try {
+      const res = await api.patch(`/b2b/admin/partners/${partnerId}`, { status: nextStatus });
+      if (res.data?.success) {
+        setB2bPartners((prev) => prev.map((p) => ((p._id || p.id) === partnerId ? { ...p, status: nextStatus } : p)));
+        showToast(`Partner "${partner.name}" status changed to ${nextStatus}.`);
+      }
+    } catch {
+      showToast('Could not update partner status.', 'error');
+    }
+  };
+
+  const handleRegenerateB2BKey = async (partner) => {
+    const partnerId = partner._id || partner.id;
+    const confirmRegen = window.confirm(`Regenerate API Key for "${partner.name}"? The existing key will stop working immediately.`);
+    if (!confirmRegen) return;
+
+    try {
+      const res = await api.post(`/b2b/admin/partners/${partnerId}/regenerate-key`);
+      if (res.data?.data) {
+        setB2bPartners((prev) => prev.map((p) => ((p._id || p.id) === partnerId ? { ...p, apiKey: res.data.data.apiKey } : p)));
+        showToast(`New API key generated for ${partner.name}!`);
+      }
+    } catch {
+      showToast('Failed to regenerate partner API key.', 'error');
+    }
+  };
+
+  const handleDeleteB2BPartner = async (partner) => {
+    const partnerId = partner._id || partner.id;
+    const confirmDelete = window.confirm(`Revoke and delete B2B partner "${partner.name}"? This action cannot be reversed.`);
+    if (!confirmDelete) return;
+
+    try {
+      const res = await api.delete(`/b2b/admin/partners/${partnerId}`);
+      if (res.data?.success) {
+        setB2bPartners((prev) => prev.filter((p) => (p._id || p.id) !== partnerId));
+        showToast(`Revoked B2B partner "${partner.name}".`);
+      }
+    } catch {
+      showToast('Failed to revoke partner.', 'error');
+    }
+  };
+
+  const handleUpdateB2BSettings = async (updatedFields) => {
+    try {
+      const res = await api.patch('/b2b/admin/settings', updatedFields);
+      if (res.data?.data) {
+        setB2bSettings(res.data.data);
+        showToast('B2B wholesale configuration updated.');
+      }
+    } catch {
+      showToast('Could not update B2B settings.', 'error');
+    }
+  };
+
   // Toggle user role
   const handleToggleUserRole = async (targetUser) => {
     const isTargetAdmin = (targetUser.role || '').toUpperCase() === 'ADMIN';
@@ -1215,6 +1363,7 @@ export const AdminPage = () => {
               </p>
               <div className="space-y-1">
                 {[
+                  { id: 'b2b', label: `B2B & API Resellers (${b2bPartners.length})`, icon: Globe, badge: 'Wholesale' },
                   { id: 'api_keys', label: 'API Status & Keys', icon: Key, badge: 'Protected' },
                   { id: 'system', label: 'System & Optimization', icon: Activity },
                   { id: 'settings', label: 'Pricing & Settings', icon: Sliders },
@@ -2279,6 +2428,478 @@ export const AdminPage = () => {
                 })}
               </div>
             )}
+          </div>
+          )}
+
+          {/* TAB: B2B API RESELLERS & WHOLESALE ENGINE */}
+          {activeTab === 'b2b' && (
+          <div className="space-y-6">
+            {/* Header Master Banner */}
+            <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-900 via-brand-950 to-indigo-950 text-white border border-brand-800/40 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="flex items-start gap-4">
+                <div className="h-12 w-12 rounded-2xl bg-brand-500/20 text-brand-300 flex items-center justify-center shrink-0 border border-brand-400/30 shadow-inner">
+                  <Globe className="h-6 w-6" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base font-black text-white">B2B API Resellers &amp; Wholesale Gateway</h2>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      Live Gateway Active
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                    Monetize and distribute this travel platform&apos;s real-time inventory (Flights, Hotels, Packages) via secure programmatic API keys to third-party travel agencies, OTAs, and corporate booking portals.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setB2bModalOpen(true)}
+                  className="rounded-xl font-black text-xs px-4 py-2 bg-brand-500 hover:bg-brand-600 shadow-md gap-1.5"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Issue New Partner Key</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Top Metric Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-xs font-bold uppercase tracking-wider">Active Resellers</span>
+                  <div className="h-8 w-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                    <Users className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-slate-900">
+                    {b2bPartners.filter((p) => p.status === 'ACTIVE').length}
+                  </span>
+                  <span className="text-xs font-semibold text-slate-400">
+                    / {b2bPartners.length} Total
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  Connected OTA &amp; Corporate Clients
+                </p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-xs font-bold uppercase tracking-wider">API Requests</span>
+                  <div className="h-8 w-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                    <Activity className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-slate-900">
+                    {b2bPartners.reduce((acc, p) => acc + (p.totalRequests || 0), 0).toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-[11px] text-sky-600 font-semibold flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
+                  Programmatic searches served
+                </p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-xs font-bold uppercase tracking-wider">B2B Wholesale GMV</span>
+                  <div className="h-8 w-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                    <TrendingUp className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-emerald-600">
+                    {formatCurrency(b2bPartners.reduce((acc, p) => acc + (p.totalRevenue || 0), 0), currency, exchangeRates)}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 font-semibold">
+                  Net invoiced reseller volume
+                </p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-xs font-bold uppercase tracking-wider">Default Margin</span>
+                  <div className="h-8 w-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                    <Sliders className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-amber-600">
+                    {b2bSettings.defaultDiscount || 8.5}%
+                  </span>
+                  <span className="text-xs font-semibold text-slate-400">Off Retail</span>
+                </div>
+                <p className="text-[11px] text-slate-500 font-semibold">
+                  Standard wholesale commission cut
+                </p>
+              </div>
+            </div>
+
+            {/* Wholesale Configuration & Pricing Tiers */}
+            <div className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-xs space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                    Wholesale Gateway Configuration
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Control global wholesale margin discounts and reseller access gates.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateB2BSettings({ enabled: !b2bSettings.enabled })}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+                      b2bSettings.enabled
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : 'bg-rose-50 border-rose-200 text-rose-700'
+                    }`}
+                  >
+                    API Gateway: {b2bSettings.enabled ? 'Online' : 'Disabled'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateB2BSettings({ sandboxMode: !b2bSettings.sandboxMode })}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+                      b2bSettings.sandboxMode
+                        ? 'bg-amber-50 border-amber-200 text-amber-700'
+                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    Sandbox Mode: {b2bSettings.sandboxMode ? 'Active' : 'Off'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Pricing Tiers Offered */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase text-slate-700 tracking-wider">
+                      Starter Tier
+                    </span>
+                    <Badge variant="outline" size="sm">5.0% Net Cut</Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Designed for boutique travel agents and local operators needing programmatic flight and hotel inventory.
+                  </p>
+                  <ul className="text-[11px] space-y-1.5 text-slate-600 font-medium">
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      <span>2,000 requests/hour rate limit</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      <span>Standard Flight &amp; Hotel REST APIs</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      <span>Direct email support</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="p-4 rounded-2xl border-2 border-brand-500 bg-brand-50/30 space-y-3 relative shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase text-brand-700 tracking-wider">
+                      Growth Tier (Popular)
+                    </span>
+                    <Badge variant="primary" size="sm">8.5% Net Cut</Badge>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Ideal for regional OTAs, travel aggregators, and fintech lifestyle app integrations.
+                  </p>
+                  <ul className="text-[11px] space-y-1.5 text-slate-700 font-medium">
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-brand-600" />
+                      <span>10,000 requests/hour rate limit</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-brand-600" />
+                      <span>Real-time Webhook booking callbacks</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-brand-600" />
+                      <span>Priority API routing &amp; telemetry</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-indigo-200 bg-indigo-50/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase text-indigo-900 tracking-wider">
+                      Enterprise Reseller
+                    </span>
+                    <Badge variant="accent" size="sm">12.0% Net Cut</Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    For high-volume multinational aggregators, corporate TMCs, and white-label platforms.
+                  </p>
+                  <ul className="text-[11px] space-y-1.5 text-slate-600 font-medium">
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>50,000+ requests/hour &amp; burst quota</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>Dedicated 99.99% uptime SLA</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>Custom wholesale flight markup</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            {/* Registered B2B Partners Table */}
+            <div className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                    Registered B2B Partner Clients ({b2bPartners.length})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Provisioned API keys, assigned commission margins, and rate limits.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Search company or email..."
+                      value={b2bSearch}
+                      onChange={(e) => setB2bSearch(e.target.value)}
+                      className="pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 w-56"
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportToCSV('b2b-partners-directory.csv', b2bPartners)}
+                    className="text-xs font-bold gap-1"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>CSV</span>
+                  </Button>
+                </div>
+              </div>
+
+              {b2bPartners.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-xs">
+                  No B2B partners registered yet. Click &quot;Issue New Partner Key&quot; to provision an API integration.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500 uppercase tracking-wider font-extrabold text-[10px]">
+                        <th className="py-3 px-3">Partner Company</th>
+                        <th className="py-3 px-3">Tier</th>
+                        <th className="py-3 px-3">Provisioned API Key</th>
+                        <th className="py-3 px-3 text-center">Margin %</th>
+                        <th className="py-3 px-3 text-center">Requests</th>
+                        <th className="py-3 px-3 text-right">Wholesale GMV</th>
+                        <th className="py-3 px-3 text-center">Status</th>
+                        <th className="py-3 px-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {b2bPartners
+                        .filter((p) => {
+                          if (!b2bSearch) return true;
+                          const q = b2bSearch.toLowerCase();
+                          return (p.name || '').toLowerCase().includes(q) || (p.contactEmail || '').toLowerCase().includes(q);
+                        })
+                        .map((partner) => {
+                          const partnerId = partner._id || partner.id;
+                          const isRevealed = revealedKeys[partnerId];
+                          const isCopied = copiedKeyId === partnerId;
+
+                          return (
+                            <tr key={partnerId} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="py-3.5 px-3">
+                                <span className="font-bold text-slate-900 block">{partner.name}</span>
+                                <span className="text-[11px] text-slate-400 block">{partner.contactEmail}</span>
+                              </td>
+                              <td className="py-3.5 px-3">
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
+                                  partner.tier === 'ENTERPRISE'
+                                    ? 'bg-purple-100 text-purple-700'
+                                    : partner.tier === 'GROWTH'
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : 'bg-slate-100 text-slate-700'
+                                }`}
+                                >
+                                  {partner.tier}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-3 font-mono text-[11px]">
+                                <div className="flex items-center gap-1.5 bg-slate-100 py-1 px-2 rounded-lg border border-slate-200 w-fit">
+                                  <span>
+                                    {isRevealed
+                                      ? partner.apiKey
+                                      : `${partner.apiKey.slice(0, 14)}••••••••`}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setRevealedKeys((prev) => ({ ...prev, [partnerId]: !isRevealed }))}
+                                    className="text-slate-400 hover:text-slate-700 p-0.5"
+                                    title={isRevealed ? 'Hide API Key' : 'Reveal API Key'}
+                                  >
+                                    {isRevealed ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(partner.apiKey);
+                                      setCopiedKeyId(partnerId);
+                                      showToast('API Key copied to clipboard!');
+                                      setTimeout(() => setCopiedKeyId(null), 2000);
+                                    }}
+                                    className="text-slate-400 hover:text-indigo-600 p-0.5"
+                                    title="Copy API Key"
+                                  >
+                                    {isCopied ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-3 text-center">
+                                <span className="font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                                  {partner.commissionDiscount}%
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-3 text-center font-bold text-slate-700">
+                                {(partner.totalRequests || 0).toLocaleString()}
+                              </td>
+                              <td className="py-3.5 px-3 text-right font-black text-slate-900">
+                                {formatCurrency(partner.totalRevenue || 0, currency, exchangeRates)}
+                              </td>
+                              <td className="py-3.5 px-3 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleB2BStatus(partner)}
+                                  className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider transition-colors border ${
+                                    partner.status === 'ACTIVE'
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                      : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                                  }`}
+                                >
+                                  {partner.status}
+                                </button>
+                              </td>
+                              <td className="py-3.5 px-3 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRegenerateB2BKey(partner)}
+                                    className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-indigo-600 transition-colors"
+                                    title="Regenerate API Key"
+                                  >
+                                    <RefreshCw className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteB2BPartner(partner)}
+                                    className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors"
+                                    title="Revoke / Delete Partner"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Developer Documentation & Integration Sandbox */}
+            <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 shadow-xl text-white space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Code className="h-5 w-5 text-brand-400" />
+                    <h3 className="text-sm font-black uppercase tracking-wider text-white">
+                      Integration SDK &amp; Programmatic Endpoints
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Sample integration code for client platforms connecting via API key.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700">
+                  {['curl', 'node', 'python'].map((lang) => (
+                    <button
+                      key={lang}
+                      type="button"
+                      onClick={() => setB2bCodeTab(lang)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all uppercase ${
+                        b2bCodeTab === lang
+                          ? 'bg-brand-500 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {lang === 'node' ? 'Node.js' : lang}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Code Snippet Box */}
+              <div className="relative">
+                <pre className="p-4 rounded-2xl bg-black/60 border border-slate-800 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed">
+                  {getB2BSnippet(b2bCodeTab)}
+                </pre>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(getB2BSnippet(b2bCodeTab));
+                    showToast('Code snippet copied to clipboard!');
+                  }}
+                  className="absolute right-3 top-3 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-300 border border-slate-700 transition-colors flex items-center gap-1"
+                >
+                  <Copy className="h-3 w-3" />
+                  <span>Copy</span>
+                </button>
+              </div>
+
+              {/* Endpoints Quick Reference Table */}
+              <div className="pt-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
+                  Standard Public B2B Wholesale Endpoints
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs font-mono">
+                  <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] text-emerald-400 font-bold block">GET</span>
+                    <span className="text-slate-200">/api/v1/b2b/flights/search</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] text-emerald-400 font-bold block">GET</span>
+                    <span className="text-slate-200">/api/v1/b2b/hotels/search</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] text-brand-400 font-bold block">POST</span>
+                    <span className="text-slate-200">/api/v1/b2b/bookings/create</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           )}
 
@@ -3351,6 +3972,141 @@ export const AdminPage = () => {
               className="rounded-xl font-bold text-xs bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20"
             >
               {editingOffer ? 'Save Changes' : 'Create Offer'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL: REGISTER NEW B2B PARTNER */}
+      <Modal
+        isOpen={b2bModalOpen}
+        onClose={() => setB2bModalOpen(false)}
+        title="Issue New B2B Partner API Key"
+      >
+        <form onSubmit={handleCreateB2BPartner} className="space-y-4 text-xs">
+          <div className="space-y-1">
+            <label htmlFor="b2bNameInput" className="font-bold text-slate-800 block text-xs">
+              Partner Company / Platform Name <span className="text-rose-500">*</span>
+            </label>
+            <input
+              id="b2bNameInput"
+              type="text"
+              required
+              value={newB2BPartner.name}
+              onChange={(e) => setNewB2BPartner((prev) => ({ ...prev, name: e.target.value }))}
+              placeholder="e.g. Skyscanner Affiliate Network"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label htmlFor="b2bEmailInput" className="font-bold text-slate-800 block text-xs">
+              Technical / Business Contact Email <span className="text-rose-500">*</span>
+            </label>
+            <input
+              id="b2bEmailInput"
+              type="email"
+              required
+              value={newB2BPartner.contactEmail}
+              onChange={(e) => setNewB2BPartner((prev) => ({ ...prev, contactEmail: e.target.value }))}
+              placeholder="e.g. api-partners@skyscanner.net"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label htmlFor="b2bTierSelect" className="font-bold text-slate-800 block text-xs">
+                Reseller Tier
+              </label>
+              <select
+                id="b2bTierSelect"
+                value={newB2BPartner.tier}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const discountMap = { STARTER: 5.0, GROWTH: 8.5, ENTERPRISE: 12.0 };
+                  const limitMap = { STARTER: 2000, GROWTH: 10000, ENTERPRISE: 50000 };
+                  setNewB2BPartner((prev) => ({
+                    ...prev,
+                    tier: val,
+                    commissionDiscount: discountMap[val] || 8.5,
+                    rateLimit: limitMap[val] || 10000,
+                  }));
+                }}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold bg-white"
+              >
+                <option value="STARTER">Starter (5% Discount, 2k req/hr)</option>
+                <option value="GROWTH">Growth (8.5% Discount, 10k req/hr)</option>
+                <option value="ENTERPRISE">Enterprise (12% Discount, 50k req/hr)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="b2bDiscountInput" className="font-bold text-slate-800 block text-xs">
+                Wholesale Margin Discount (%)
+              </label>
+              <input
+                id="b2bDiscountInput"
+                type="number"
+                step="0.5"
+                min="0"
+                max="50"
+                value={newB2BPartner.commissionDiscount}
+                onChange={(e) => setNewB2BPartner((prev) => ({ ...prev, commissionDiscount: Number(e.target.value) }))}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label htmlFor="b2bRateLimitInput" className="font-bold text-slate-800 block text-xs">
+                Rate Limit (requests / hour)
+              </label>
+              <input
+                id="b2bRateLimitInput"
+                type="number"
+                step="500"
+                min="100"
+                value={newB2BPartner.rateLimit}
+                onChange={(e) => setNewB2BPartner((prev) => ({ ...prev, rateLimit: Number(e.target.value) }))}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="b2bWebhookInput" className="font-bold text-slate-800 block text-xs">
+                Webhook URL (Optional)
+              </label>
+              <input
+                id="b2bWebhookInput"
+                type="url"
+                value={newB2BPartner.webhookUrl}
+                onChange={(e) => setNewB2BPartner((prev) => ({ ...prev, webhookUrl: e.target.value }))}
+                placeholder="https://client-ota.com/webhooks/travel"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold"
+              />
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setB2bModalOpen(false)}
+              className="rounded-xl font-bold text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              loading={b2bModalSubmitting}
+              className="rounded-xl font-bold text-xs px-5 bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20"
+            >
+              Provision Partner &amp; Generate Key
             </Button>
           </div>
         </form>

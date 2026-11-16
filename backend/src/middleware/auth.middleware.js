@@ -39,7 +39,7 @@ export const authenticate = async (req, res, next) => {
     let user = null;
     if (isDbConnected()) {
       const result = await query(
-        'SELECT id, name, email, role, phone, created_at, updated_at FROM users WHERE id = $1',
+        'SELECT id, name, email, role, phone, wallet_balance, created_at, updated_at FROM users WHERE id = $1',
         [decoded.id],
       );
       if (result.rows.length > 0) {
@@ -48,6 +48,7 @@ export const authenticate = async (req, res, next) => {
           ...row,
           _id: row.id,
           role: (row.role || 'CUSTOMER').toUpperCase(),
+          walletBalance: Number(row.wallet_balance != null ? row.wallet_balance : 1000),
         };
       }
     } else if (mongoose.connection.readyState === 1) {
@@ -55,13 +56,18 @@ export const authenticate = async (req, res, next) => {
       if (mongoUser) {
         user = mongoUser.toObject();
         user.role = (user.role || 'CUSTOMER').toUpperCase();
+        user.walletBalance = Number(user.walletBalance != null ? user.walletBalance : 1000);
       }
     } else {
       const memUser = memoryStore.users.find(
         (u) => u.id === decoded.id || u._id?.toString() === decoded.id,
       );
       if (memUser) {
-        user = { ...memUser, role: (memUser.role || 'CUSTOMER').toUpperCase() };
+        user = {
+          ...memUser,
+          role: (memUser.role || 'CUSTOMER').toUpperCase(),
+          walletBalance: Number(memUser.walletBalance != null ? memUser.walletBalance : 1000),
+        };
       }
     }
 

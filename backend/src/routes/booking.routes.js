@@ -39,7 +39,7 @@ const createBookingSchema = {
 
 const bookingIdSchema = {
   params: z.object({
-    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid booking ID format'),
+    id: z.string().min(1, 'Invalid booking ID format'),
   }).strict(),
 };
 

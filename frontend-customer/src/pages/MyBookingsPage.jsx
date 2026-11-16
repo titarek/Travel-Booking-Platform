@@ -18,7 +18,14 @@ import api from '../api/axios.js';
 
 export const MyBookingsPage = () => {
   const navigate = useNavigate();
-  const { user, currency, exchangeRates, openAuthModal } = useAuth();
+  const {
+    user,
+    currency,
+    exchangeRates,
+    openAuthModal,
+    fetchWallet,
+    updateWalletBalance,
+  } = useAuth();
 
   const [bookings, setBookings] = useState([]);
   const [selectedTicketBooking, setSelectedTicketBooking] = useState(null);
@@ -60,6 +67,11 @@ export const MyBookingsPage = () => {
       const res = await api.patch(`/bookings/${bookingId}/cancel`);
       if (res.data?.data) {
         setBookings((prev) => prev.map((b) => (b._id === bookingId ? { ...b, status: 'CANCELLED' } : b)));
+        if (res.data.data.walletBalance != null) {
+          updateWalletBalance(res.data.data.walletBalance);
+        } else {
+          fetchWallet();
+        }
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Could not cancel booking.');

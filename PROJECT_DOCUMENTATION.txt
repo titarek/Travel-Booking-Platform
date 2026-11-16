@@ -1,0 +1,638 @@
+================================================================================
+TRAVEL. — ENTERPRISE ONLINE TRAVEL AGENCY (OTA) & B2B DISTRIBUTION PLATFORM
+COMPLETE SOFTWARE REQUIREMENTS SPECIFICATION (SRS) & SYSTEM OPERATIONS MANUAL
+================================================================================
+Document Version: 3.0.0 (Production Release)
+Classification: Enterprise System Architecture, Comprehensive Functional
+                Requirements & User Interaction Catalog
+Audience: Platform Buyer, Executive Stakeholders, Technical Due Diligence Teams
+          & Engineering Leads
+================================================================================
+
+1. EXECUTIVE SUMMARY & COMMERCIAL ARCHITECTURE
+--------------------------------------------------------------------------------
+Travel. is an enterprise-grade, turn-key Online Travel Agency (OTA) and wholesale
+B2B travel distribution platform. Engineered to operate as an autonomous travel
+ecosystem, the platform powers high-volume consumer retail transactions and
+automated business-to-business reseller integrations across three core verticals:
+Commercial Aviation (Flights), Hospitality (Hotels & Resorts), and Curated Travel
+(Holiday & Umrah Tour Packages).
+
+Platform Revenue & Operational Pillars:
+1. Direct-to-Consumer (B2C) Portal:
+   A consumer-facing booking engine featuring interactive GIS flight route radar
+   maps, dynamic nearby hotel discovery with automated hospitality filtering,
+   multi-currency localization, promotional campaigns, bank lifestyle card
+   privileges, stored-value customer digital wallet financing, and official
+   IATA-compliant electronic passenger tickets.
+2. Business-to-Business (B2B) Reseller & API Marketplace:
+   A partner API gateway that allows external travel agencies, corporate travel
+   desks, and third-party mobile applications to query live inventories, obtain
+   wholesale net fares based on customizable margin tiers, and create bookings
+   programmatically via secure API keys.
+3. Enterprise Administrative Command Center:
+   A centralized operations hub with real-time Server-Sent Events (SSE) telemetry,
+   audible order chimes, booking lifecycle management, staff-to-customer e-ticket
+   parity, catalog curation, a Master PIN-protected third-party API key vault,
+   and an immutable regulatory audit trail.
+
+
+2. HIGH-LEVEL SOFTWARE ARCHITECTURE
+--------------------------------------------------------------------------------
+The platform follows a modular, decoupled service-oriented architecture designed
+for maximum fault tolerance, horizontal scaling, and sub-second transaction
+processing.
+
+               +-------------------------------------------------+
+               |            CLIENT PRESENTATION LAYER            |
+               |  Consumer Web  |  Operations Console  |  B2B    |
+               +-----------------------+-------------------------+
+                                       |
+                                       v
+               +-------------------------------------------------+
+               |        APPLICATION & API GATEWAY ENGINE         |
+               |  - Identity, JWT & Master PIN Security Gateway  |
+               |  - Flight Radar & GIS Telemetry Interpolator    |
+               |  - Hotel Places Discovery & Normalizer          |
+               |  - Digital Wallet: Stored-Value & Fast Refund   |
+               |  - B2B API Token & Wholesale Margin Matrix      |
+               |  - Real-Time Order Streamer (SSE) with Chimes   |
+               |  - Immutable Audit Logging & Regulatory Trail   |
+               +-----------------------+-------------------------+
+                                       |
+                                       v
+               +-------------------------------------------------+
+               |        EXTERNAL GLOBAL SERVICE PROVIDERS        |
+               |  Geoapify | Aviationstack | Amadeus              |
+               |  ExchangeRate | Stripe                          |
+               +-------------------------------------------------+
+
+Architectural Principles:
+- Decoupled Autonomy: Frontend client applications are completely decoupled from
+  backend microservices, communicating exclusively via structured JSON REST
+  endpoints and persistent event streams.
+- Dual-Tier Resilient Persistence: System operations maintain continuous
+  persistence backed by high-availability cloud databases, complemented by
+  seamless in-memory operational caches to ensure uninterrupted service delivery
+  during external provider outages.
+- Two-Tier Administrative Security: Standard administrative capabilities are
+  protected by encrypted JWT tokens, while sensitive platform operations (API key
+  rotation, master credentials, security settings) require a secondary Master
+  Security PIN.
+
+
+3. USER CLASSES & STAKEHOLDER PERSONAS
+--------------------------------------------------------------------------------
+1. Guest Traveler:
+   Browses flights, tracks aircraft on live maps, queries nearby hotels, explores
+   holiday packages, and calculates currency rates without requiring mandatory
+   upfront registration.
+2. Registered Customer:
+   Maintains an authenticated account, holds an active Stored-Value Digital
+   Wallet, executes 1-click booking checkouts, reviews reservation histories,
+   prints official e-tickets, and executes self-service cancellations.
+3. B2B Agency Partner:
+   Commercial travel agency or corporate client authenticated via API tokens who
+   programmatically queries wholesale travel inventories, accesses tiered B2B net
+   rates, and issues tickets directly into client systems.
+4. Operations Administrator:
+   Staff member who manages daily reservations, confirms travel bookings,
+   inspects passenger vouchers, curates inventory catalogs (Hotels, Flights, Tour
+   Packages), and executes campaign updates.
+5. Super Administrator / Platform Owner:
+   Executive administrator holding Master PIN credentials. Controls platform
+   commission percentages, wholesale reseller margins, third-party API key vault
+   rotation, maintenance modes, and user role promotions.
+
+
+4. COMPREHENSIVE FUNCTIONAL REQUIREMENTS SPECIFICATION (FRS)
+--------------------------------------------------------------------------------
+
+4.1 GLOBAL NAVIGATION, LOCALIZATION & AUTHENTICATION ENGINE
+--------------------------------------------------------------------------------
+4.1.1 User Authentication & Profile Governance:
+- Customer Account Registration:
+  Users click "Create Account" to open an account creation modal. Captures
+  traveler full name, primary email address, mobile phone number, and password.
+  Enforces password security standards and prevents duplicate email registration.
+- Customer Secure Login:
+  Authenticates via email and password; issues an encrypted JSON Web Token (JWT)
+  stored securely for session persistence. Automatically restores active sessions
+  upon browser refresh or revisit via /api/auth/me.
+- Guest Checkout Transition:
+  Unauthenticated travelers can search and configure bookings; upon reaching
+  checkout, they are prompted to either log in or complete the reservation with
+  automatic account provisioning.
+- Profile & Session Controls:
+  Authenticated users see an avatar badge displaying their initials, account name,
+  and email. Includes a one-click "Logout" option that terminates local tokens
+  and securely clears application state.
+
+4.1.2 Multi-Currency Real-Time Engine:
+- Interactive Currency Switcher:
+  Available in the global navigation bar across every page on the platform.
+  Supported currencies:
+  * USD ($) — United States Dollar (Base Currency)
+  * BDT (৳) — Bangladeshi Taka
+  * EUR (€) — European Union Euro
+  * GBP (£) — British Pound Sterling
+  * AED (د.إ) — United Arab Emirates Dirham
+  * SAR (﷼) — Saudi Riyal
+- System-Wide Instant Recalculation:
+  Selecting a currency instantly recalculates every price displayed on the site—
+  including flight search cards, hotel nightly rates, tour package pricing, promo
+  discounts, wallet balances, and checkout summaries—without reloading the page.
+  Rates update from the backend exchange rate service with verified precision
+  rounding.
+
+4.1.3 Global Header & Service Tabs:
+- Brand Identity & Fast Navigation:
+  Clicking the corporate "Travel." logo instantly returns the user to the central
+  dashboard.
+- Service Vertical Selectors:
+  One-click top-level navigation tabs allowing users to jump between Flights,
+  Hotels, Holidays, Umrah, Visa Guide, and Flight Status Live.
+- Administrative Bridge:
+  Authorized staff logged into the customer portal see an "Admin Console" quick-
+  action link that transitions them directly into the operations command center.
+
+
+4.2 FLIGHT ENGINE, LIVE RADAR MAP & TELEMETRY HUD
+--------------------------------------------------------------------------------
+4.2.1 Route Query & Availability Search:
+- Search Interface:
+  * Origin Field: Dropdown and autocomplete search for origin city or 3-letter
+    IATA airport code (e.g., DAC Dhaka, DXB Dubai, LHR London Heathrow, JFK New
+    York).
+  * Swap Button: Dedicated two-way arrow button that instantly reverses origin
+    and destination selections with a single click.
+  * Destination Field: Dropdown and autocomplete search for arrival airport or
+    city.
+  * Date Pickers: Departure and optional return date selectors with dynamic
+    calendar overlays and day-of-week indicators.
+  * Cabin Class & Occupancy: Selector for passenger count (Adults, Children,
+    Infants) and cabin tier (Economy, Premium Economy, Business, First Class).
+  * Quick Route Shortcuts: Pre-configured one-click search chips for high-demand
+    corridors: DAC -> DXB, DAC -> CXB, DAC -> ZYL, and DXB -> DAC.
+
+4.2.2 Search Results & Advanced Filtering:
+- Dynamic Results Grid:
+  Displays flights matching criteria with airline branding, flight numbers (e.g.,
+  EK585, FZ584, BS341), departure times, arrival times, flight duration, and
+  transit stops. Displays real-time fare pricing per traveler in the chosen
+  currency. Shows service badges: Non-refundable vs Free Cancellation, baggage
+  allowances (e.g., 1 x 20 kg or 2 x 23 kg), and instant e-ticket issuance
+  guarantees.
+- Filter Sidebar Controls:
+  * Stops Selector: Radio buttons to filter between All Flights, Non-stop Only,
+    and 1 Stop.
+  * Max Price Range Slider: Interactive slider dynamically filtering flights
+    based on maximum fare budget.
+  * Airline Checkboxes: Multi-select filters allowing travelers to isolate
+    specific carriers (Emirates, FlyDubai, Biman Bangladesh Airlines, US-Bangla,
+    Singapore Airlines).
+
+4.2.3 Interactive Live GIS Flight Trajectory Radar Map:
+- Trigger:
+  Clicking the "Details" or "Flight Selected" button on any flight card opens
+  the Flight Telemetry & GIS Radar modal.
+- Vector Cartography Engine:
+  Employs Leaflet GIS layered with high-resolution Geoapify vector map tiles.
+  Renders departure airport marker (with IATA code, airport name, city, and
+  terminal) and arrival airport marker. Connects the route with an accurate
+  geodesic curved flight corridor polyline.
+- Dynamic Aircraft Positioning:
+  Renders a distinct commercial aircraft icon oriented along the route vector.
+  Dynamically calculates and places the aircraft at the exact percentage of the
+  journey traversed based on departure, elapsed time, and scheduled arrival
+  (e.g., 71% Route Traversed).
+- Sticky Zoom & Pan Controls:
+  Features dedicated Zoom In (+) and Zoom Out (-) buttons. Map position and zoom
+  level remain fixed during interaction without automated camera snapping or
+  jitter.
+- Live Telemetry HUD (Heads-Up Display):
+  Overlays real-time flight telemetrics:
+  * Current GPS: Live latitude and longitude coordinates (e.g., 24.13° N, 67.08° E).
+  * Cruising Altitude: Real-time flight altitude (e.g., 38,000 ft / 11,582 m or
+    Ground).
+  * Ground Speed: Current velocity displayed in km/h and knots (e.g., 860 km/h /
+    464 knots).
+  * Heading & Track: Magnetic track bearing (e.g., 284° WNW).
+  * Operational Status: Real-time status badge (IN FLIGHT, SCHEDULED, LANDED,
+    DELAYED).
+  * Airport Logistics: Departure Gate, Boarding Terminal, Arrival Terminal, and
+    Baggage Carousel Belt number.
+  * Aircraft Specifications: Aircraft model (e.g., Boeing 787-9 Dreamliner,
+    Airbus A380-800) and Mode-S ICAO24 transponder hex code.
+- Direct Booking CTA:
+  An embedded "Proceed to Book This Flight" button allows travelers to transition
+  immediately into the checkout modal from the radar screen.
+
+
+4.3 LOCATION-BASED HOTEL DISCOVERY & GEOAPIFY RADAR ENGINE
+--------------------------------------------------------------------------------
+4.3.1 Location Search & Nearby Radar Trigger:
+- City & Destination Input:
+  Autocomplete search bar accepting any worldwide city, tourist hub, or
+  municipality (e.g., Cox's Bazar, Dubai, Singapore, Tokyo, Rome, Natore, Sylhet).
+- "Nearby / Near Me" Radar Button:
+  Clicking the "Nearby / Near Me" button requests browser geolocation coordinates.
+  System executes a dynamic radial search around the user's current GPS position
+  to surface verified local accommodations.
+- Quick Destination Buttons:
+  Direct one-click destination chips for high-traffic tourism markets: Cox's
+  Bazar, Dubai, Tokyo, Paris, Rome, Bali.
+- Dates & Occupancy Selector:
+  Check-In Date and Check-Out Date calendar pickers with calculated stay duration
+  (e.g., 3 Nights). Guests & Rooms occupancy modal to specify adults, children,
+  and room quantities.
+
+4.3.2 Geoapify Places Integration & Strict Hospitality Filtering:
+- Geoapify Places API Query:
+  Backend converts target location into geographic coordinates and queries the
+  Geoapify Places engine under category 'accommodation.hotel'.
+- Automated Hospitality Filtering Algorithm:
+  The platform applies strict keyword filtering to ensure results include ONLY
+  commercial, bookable travel accommodations. Evaluates property titles and
+  descriptions to ensure they contain approved hospitality terms: Hotel, Resort,
+  Motel, Inn, Suites, Palace, or Villa. Automatically filters out and purges
+  student hostels, private residential dormitories, girls/boys hostels, and
+  unlicensed boarding facilities that lack commercial reservation systems.
+- Responsive Card & Border Safety:
+  Hotel card layouts utilize strict CSS overflow containment (break-words,
+  line-clamp-2, truncate). Guarantees that extended international street
+  addresses, localized foreign script characters (e.g., Bengali, Arabic, Japanese),
+  and lengthy descriptions remain inside card boundaries on mobile, tablet, and
+  desktop screens.
+
+4.3.3 Hotel Listings & Property Details Modal:
+- Listing Content:
+  High-resolution property photography, star rating display (3-Star, 4-Star,
+  5-Star Luxury), guest review badge (e.g., Superb 4.8 or Very Good 4.5), property
+  name, full street address, distance from city center (e.g., 2.3 km from center),
+  nightly room rates, and verified amenity chips (High-Speed WiFi, Air
+  Conditioning, Swimming Pool, Breakfast Included).
+- Detailed Hotel Modal:
+  Clicking "Details" opens an extensive modal showcasing image galleries, full
+  property descriptions, check-in policies (14:00) and check-out policies (12:00),
+  room tier selection (Standard Room, Deluxe Ocean Suite, Executive Suite), and
+  cancellation rules.
+- "Book Room" Checkout Trigger:
+  Locks the selected property and room tier and transitions directly to the
+  checkout engine.
+
+
+4.4 HOLIDAY & UMRAH TOUR PACKAGES MODULE
+--------------------------------------------------------------------------------
+4.4.1 Curated Package Showcase:
+- Diverse Tour Portfolio:
+  Displays curated travel packages categorized by themes: Beach Escapes, Island
+  Holidays, Cultural Explorations, and Religious Umrah Pilgrimages.
+- Package Presentation:
+  Destination imagery, title, duration badges (e.g., 5 Days / 4 Nights, 10 Days /
+  9 Nights), price per traveler, strikethrough original pricing, and promotional
+  discount badges (e.g., Best Seller, Popular).
+- Detailed Tour Modal:
+  Clicking any package card opens an extensive itinerary walkthrough:
+  * Day-by-Day Schedule: Breakdown of guided activities, excursions, and leisure.
+  * Included Accommodations: Hotel star ratings and room arrangements.
+  * Logistical Transfers: Speedboat transfers, luxury coach travel, or domestic
+    connecting flights.
+  * Meal Plans: Inclusions (Daily buffet breakfast, sunset dinner cruises).
+  * Visa Guidance: Visa requirements and platform assistance details.
+- Package Booking Action:
+  "Book This Package" button opens the traveler information and checkout flow.
+
+
+4.5 DYNAMIC PROMOTIONAL OFFERS & BANK PARTNER PRIVILEGES
+--------------------------------------------------------------------------------
+4.5.1 Consumer Special Offers Grid:
+- Promotional Cards:
+  Features dynamic vouchers displayed in a 3-column responsive grid on the
+  homepage. Rendered with gradient themes (Ocean Sky Blue, Amber Sunset, Emerald
+  Palm, Royal Purple). Displays promotional badges (e.g., Promo: TRAVEL20, Beach
+  Escape), prominent headlines (e.g., Flat 15% OFF on International Flights), and
+  descriptive subheadings.
+- Direct Routing Buttons:
+  Clicking the action button (e.g., "Book Now", "View Resorts", "Explore
+  Packages") automatically applies corresponding filters and redirects travelers
+  directly to the relevant booking section.
+
+4.5.2 Bank Partner & Lifestyle Card Privileges:
+- Institutional Partnership Cards:
+  Showcases co-branded privileges for partner banking institutions:
+  * EBL Visa Travel Lifestyle Card: Co-branded travel privilege card offering
+    0% EMI up to 12 months, complimentary Balaka Executive Lounge access, and
+    2x TripCoins rewards.
+  * bKash Instant Cash Back: Instant rebate promotion crediting cash back
+    directly to customer digital wallets on domestic routes.
+  * City Bank American Express: Premium partner tier providing 12% hotel
+    discounts, Amex lounge access at Hazrat Shahjalal International Airport, and
+    free room upgrades.
+- Cardholder Terms:
+  Displays validity dates, promo voucher codes, and participating airline/hotel
+  lists.
+
+4.5.3 Administrative Offer Governance:
+- Full CRUD Management:
+  Administrators can create new promotional cards, modify headlines, adjust
+  discounts, update promo codes, change button links, and set expiration dates.
+- Live Active Toggle:
+  One-click switch allowing administrators to toggle promotions between Live on
+  Site and Paused / Hidden without deleting the record.
+- Deletion Protection:
+  Deleting any promotion prompts for a mandatory justification and logs the
+  action to the audit trail.
+
+
+4.6 CUSTOMER DIGITAL WALLET & STORED-VALUE SYSTEM
+--------------------------------------------------------------------------------
+4.6.1 Stored-Value Account Management:
+- Integrated User Wallet:
+  Every registered customer profile maintains an integrated digital wallet
+  displaying their real-time available balance in the active currency.
+- Instant Wallet Top-Up:
+  Customers can load funds into their wallet using credit/debit cards (via Stripe)
+  or mobile banking gateways. Deposits are authorized and credited to the wallet
+  balance immediately with real-time balance updates.
+- One-Click Instant Checkout:
+  During flight, hotel, or package checkout, travelers can select "Pay with Travel
+  Wallet" as their payment method. If the wallet balance is sufficient, the fare
+  is deducted immediately and the booking is confirmed in under one second without
+  external gateway redirects.
+- Split-Tender Payment Support:
+  If the wallet balance covers only a portion of the total fare, the customer can
+  apply their full wallet balance and settle the remaining balance using a credit
+  card or alternative payment method.
+- Instant Automated Refund-to-Wallet:
+  When an eligible flight, hotel, or package booking is cancelled, the refunded
+  amount is credited back to the customer's wallet balance instantly, eliminating
+  traditional 5-10 business day banking turnaround times.
+- Itemized Wallet Ledger:
+  Customers can review their complete transaction history, displaying
+  chronological records of deposits, booking debits, and refund credits with
+  associated reference IDs.
+
+
+4.7 B2B RESELLER & WHOLESALE API MARKETPLACE
+--------------------------------------------------------------------------------
+4.7.1 B2B Agency Provisioning & Credentialing:
+- Partner Onboarding Panel:
+  Administrators can register external travel agencies, tour operators, and
+  corporate desks through the admin console. Issues cryptographically secure API
+  keys (pk_live_...) with assigned rate-limiting tiers (Standard, Professional,
+  Enterprise) and IP whitelist restrictions.
+- Wholesale Commission & Markup Engine:
+  Administrators set wholesale commission margins (e.g., offering approved B2B
+  partners a 7% net discount below published retail fares). System automatically
+  computes and delivers wholesale net rates when authenticated requests are
+  received via partner API keys.
+- Dedicated Programmatic Headless Endpoints:
+  External partner systems can consume structured JSON endpoints:
+  * GET /api/v1/b2b/flights/search: Query real-time flight route availability
+    with B2B net pricing.
+  * GET /api/v1/b2b/hotels/search: Query worldwide hotel properties, room
+    availability, and wholesale rates.
+  * GET /api/v1/b2b/packages: Query tour package itineraries and departure
+    allocations.
+  * POST /api/v1/b2b/bookings/create: Programmatically create reservations and
+    receive instant PNR confirmations.
+  * GET /api/v1/b2b/bookings/:id/ticket: Retrieve official passenger e-tickets in
+    structured JSON or printable PDF format.
+- Partner Governance & Consumption Metering:
+  Real-time monitoring of API request volumes per partner key. Administrators
+  can pause, renew, or revoke partner credentials instantly from the admin
+  dashboard.
+
+
+4.8 CHECKOUT ENGINE, TRAVELER METADATA & PAYMENT SETTLEMENT
+--------------------------------------------------------------------------------
+4.8.1 Order Configuration & Price Ledger:
+- Reservation Summary:
+  Displays a breakdown of selected services (flight route, hotel room tier, or
+  tour package), travel dates, and occupancy counts.
+- Fare Ledger:
+  Itemizes base fare, platform service fee, government aviation/hotel taxes, and
+  applied promotional discounts, displaying the final payable amount in the
+  selected currency.
+
+4.8.2 Traveler Metadata Capture:
+- Primary Traveler Information:
+  Captures title (Mr., Mrs., Ms.), given name, surname, date of birth, passport
+  number, passport expiration date, and nationality.
+- Emergency Contact Details:
+  Captures traveler email address (for electronic voucher delivery) and
+  international mobile telephone number.
+
+4.8.3 Payment Settlement:
+- Payment Gateways:
+  Supports instant settlement via Travel Wallet, Credit/Debit Card (Stripe), and
+  Bank Transfer Verification.
+- Transaction Finalization:
+  Upon payment authorization, the system creates an immutable database reservation,
+  assigns a unique 6-character PNR (bookingReference), generates an electronic
+  ticket number, broadcasts a real-time event to the admin console, and displays
+  the official E-Ticket Voucher modal immediately.
+
+
+4.9 OFFICIAL PASSENGER E-TICKET VOUCHER & PRINTING ENGINE
+--------------------------------------------------------------------------------
+4.9.1 Official IATA-Compliant Document Elements:
+- Corporate Letterhead:
+  Features the corporate "Travel." branding, official passenger travel voucher
+  accreditation notice, and 24/7 global support contacts.
+- PNR & Official Status Block:
+  Prominently displays the 6-character Booking Reference (PNR, e.g., 78-529) and
+  unique Electronic Ticket Number (ETKT-784-XXXXXX-XX). Displays official status
+  badges: CONFIRMED and PAID.
+- Passenger Information:
+  Full traveler name, passenger type (Adult/Primary), passport number,
+  nationality, email, and contact phone.
+- Service Itinerary Breakdown:
+  * Flights: Origin airport, 3-letter IATA code, terminal, departure date and
+    exact time, route duration, transit stops, destination airport, IATA code,
+    terminal, arrival date and exact time.
+  * Baggage & Cabin: Cabin class (Economy/Business), checked baggage allowance
+    (e.g., 2 x 23 kg), cabin carry-on allowance (7 kg), and boarding seat status
+    ("Assigned at Check-in").
+  * Hotels: Property name, verified street address, room type, check-in date/time
+    (14:00), check-out date/time (12:00), and guest occupancy.
+  * Tour Packages: Package title, destination, departure date, trip duration,
+    and package category.
+- Financial Summary:
+  Payment method, transaction reference ID, security authorized badge, and total
+  fare paid in selected currency.
+- Airport Boarding Security Barcode:
+  Renders a high-density barcode graphic containing machine-readable traveler and
+  flight metadata for airport terminal gate scanning.
+- Aviation & Travel Regulatory Conditions:
+  Displays standard travel terms regarding passport validity (minimum 6 months),
+  airport check-in counter closure timelines, and carriage conditions.
+
+4.9.2 Isolated Printing & PDF Engine:
+- Print Stylesheet Isolation (@media print):
+  Clicking "Print Official E-Ticket" triggers a print stylesheet that isolates
+  the voucher document. Automatically suppresses website navigation bars,
+  headers, footers, buttons, and backdrop dialogs. Generates a clean,
+  professional paper printout or downloadable PDF document.
+
+
+4.10 CUSTOMER BOOKING MANAGEMENT ("MY BOOKINGS")
+--------------------------------------------------------------------------------
+4.10.1 Self-Service Customer Dashboard:
+- Filter Tabs:
+  Categorizes reservations under All Bookings, Flights, Hotels, and Tour Packages.
+- Reservation Cards:
+  Displays booking reference (PNR), booking date, service vertical icon, summary
+  details (flight route, hotel name, or package destination), total fare paid, and
+  status badge (CONFIRMED, PENDING, CANCELLED).
+- Instant Voucher Re-Printing:
+  Clicking the "View E-Ticket" button on any booking card re-opens the official
+  passenger voucher for viewing or printing.
+- Self-Service Cancellation Flow:
+  Customers can initiate cancellations on eligible bookings. Cancelling updates
+  the reservation status to CANCELLED and triggers an automated refund credited
+  back to their digital wallet balance.
+
+
+4.11 ENTERPRISE ADMINISTRATIVE COMMAND CENTER
+--------------------------------------------------------------------------------
+4.11.1 Real-Time Live Order Stream (SSE Telemetry):
+- Persistent Event Connection:
+  Uses Server-Sent Events (SSE) via /api/admin/realtime to push incoming
+  reservations directly to administrative screens in real time.
+- Audible Notification Alert:
+  When a new customer booking is completed anywhere in the world, the admin
+  console plays an audio chime alert and highlights the new order row, enabling
+  operations staff to process bookings without manual page refreshing.
+- Resilient Polling Safeguard:
+  Automatically pairs SSE streaming with a background poller, ensuring
+  continuous synchronization even during unstable network connections.
+
+4.11.2 Operational Analytics & Overview:
+- Key Performance Indicators (KPIs):
+  Real-time metrics tracking Total Platform Revenue, Total Bookings Count, Active
+  Travelers, Net Commission Earnings, and Conversion Rates.
+- Revenue Vertical Distribution:
+  Visual progress metrics breaking down earnings across Flights, Hotels, and Tour
+  Packages.
+- Recent Activity Feed:
+  Real-time log of recent transactions with direct action shortcuts.
+
+4.11.3 Reservation Management & Customer Ticket Parity:
+- Search & Multi-Filter Controls:
+  Search bookings by customer name, email address, or reference ID (PNR). Filter
+  by operational status (Confirmed, Pending, Cancelled) and service vertical.
+- Invoice Breakdown Inspection:
+  Clicking the "Eye" button opens an itemized financial invoice showing base
+  service subtotal, platform commission fees, and tax distributions.
+- Staff-to-Customer E-Ticket Parity:
+  Beside every reservation, administrators have a dedicated Ticket button.
+  Clicking it opens the exact official customer e-ticket voucher seen by the
+  passenger, complete with itinerary schedules, barcode, and print capabilities.
+- Reservation Lifecycle Actions:
+  * Confirm: One-click confirmation for pending reservations with automated
+    status updates.
+  * Cancel: Cancelling requires the administrator to input a mandatory reason,
+    updating the booking and recording the action in the audit trail.
+
+4.11.4 Inventory Catalog Management (Full CRUD):
+- Hotel Inventory:
+  View complete property directory with city, location, and nightly rates. Add
+  new properties with photo URLs, star ratings, and room tiers. Toggle "Featured"
+  badge with one click to promote properties to the consumer homepage. Delete
+  properties with a mandatory justification logged to the audit trail.
+- Flight Inventory:
+  Register new flight routes, configure airlines, origin/destination airports,
+  scheduled departure/arrival times, cabin classes, and seat counts. Toggle flight
+  operational status (On Time, Delayed, Departed, Cancelled). Delete flight routes
+  with mandatory logged justification.
+- Holiday Tour Packages:
+  Curate travel packages, set day/night durations, list daily activity highlights,
+  and specify meal/transfer inclusions. Toggle "Featured" status to highlight
+  packages on the homepage. Delete packages with mandatory logged justification.
+- Offers & Promotional Campaigns:
+  Full management of consumer promo cards and bank partner privileges. Add, edit,
+  select gradient themes, toggle active live status, and delete with audit trail
+  logging.
+
+4.11.5 Master PIN-Protected Third-Party API Key Vault:
+- Master PIN Security Gateway:
+  Access to third-party API credentials and platform security tokens requires
+  entering a secondary Master Security PIN (default: 1234).
+- Runtime Hot-Reloading Key Vault:
+  Administrators can rotate API keys for:
+  * Geoapify API: Places discovery, vector mapping, and geocoding.
+  * Aviationstack API: Live flight radar telemetry and aircraft status.
+  * Amadeus API: Global scheduled airline distribution.
+  * Stripe API: Payment gateway secret keys.
+  * ExchangeRate API: Live currency conversion rates.
+  Saving new keys updates database settings and hot-reloads credentials in backend
+  server memory immediately without restarting processes or causing server
+  downtime.
+
+4.11.6 SaaS Platform Settings & Governance:
+- Platform Commission Rate:
+  Interactive slider adjusting the global commission fee percentage (e.g., 5.0%)
+  earned by the platform on retail bookings.
+- Maintenance Mode Switch:
+  Toggle that gracefully places the consumer portal into maintenance mode during
+  scheduled system upgrades while keeping the admin console accessible.
+- Broadcast Announcement Banner:
+  Control a site-wide broadcast banner displaying global promotional announcements
+  or critical travel advisories across the consumer portal.
+- Currency Exchange Rate Matrix:
+  Review and manually adjust conversion rates for USD, BDT, EUR, GBP, AED, and SAR.
+
+4.11.7 User Directory & Role Governance:
+- Customer Directory:
+  Inspect all registered accounts, registration dates, contact details, and
+  lifetime booking counts.
+- Role Promotion:
+  Elevate verified staff members from Customer to Administrator, or demote
+  administrator privileges back to standard customer accounts.
+
+4.11.8 Immutable Audit Trail & Regulatory Compliance:
+- Automated Audit Logging:
+  The platform automatically captures an immutable record of every sensitive
+  administrative action (deleting inventory, cancelling bookings, rotating API
+  keys, updating commission rates, modifying user roles).
+- Audit Metadata Captured:
+  Precision timestamp, acting administrator email, action classification
+  (DELETE_HOTEL, CANCEL_BOOKING, ROTATE_API_KEY, etc.), target item name,
+  mandatory administrator justification reason, and originating IP address.
+- Tamper-Proof Design:
+  Audit records cannot be altered or removed through the user interface,
+  satisfying enterprise compliance standards.
+
+
+5. NON-FUNCTIONAL REQUIREMENTS (NFR)
+--------------------------------------------------------------------------------
+- Performance & Sub-Second Latency:
+  Catalog queries and hotel radar searches resolve in under 400 milliseconds.
+  Real-time SSE order notifications arrive at administrative terminals within
+  250 milliseconds of payment settlement.
+- Enterprise Security Standards:
+  Stateless session management utilizing HMAC-SHA256 signed JSON Web Tokens (JWT).
+  Industry-standard salted Bcrypt encryption for all stored passwords. Two-tier
+  security structure isolating master credentials behind an independent Master
+  Security PIN. Strict sanitization on all text inputs to prevent XSS and
+  injection vulnerabilities.
+- Dual-Tier Reliability & Fault Tolerance:
+  If external supplier APIs experience downtime, the platform gracefully serves
+  cached inventory without throwing user-facing errors.
+- Cross-Device Responsiveness:
+  Mobile-first architecture supporting smartphone screens, tablets, laptops, and
+  multi-monitor administrative setups. Verified cross-browser compatibility across
+  Google Chrome, Apple Safari, Mozilla Firefox, and Microsoft Edge.
+
+
+6. VERIFICATION & SYSTEM HANDOVER ACCEPTANCE
+--------------------------------------------------------------------------------
+This document represents the complete, verified specification of the Travel.
+enterprise platform. Every functionality—including consumer booking engines,
+live flight GIS radar, location-based hotel discovery, holiday packages,
+promotional campaigns, customer digital wallet financing, B2B wholesale API
+distribution, and the administrative command center—is delivered in a fully
+operational state.
+================================================================================

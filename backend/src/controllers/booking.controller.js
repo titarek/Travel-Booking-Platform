@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import { Booking } from '../models/booking.model.js';
+import { User } from '../models/user.model.js';
+import { WalletTransaction } from '../models/walletTransaction.model.js';
 import { memoryStore } from '../utils/memoryStore.js';
 import { notifyAdminClients } from '../utils/realtime.js';
 import { isDbConnected, query } from '../config/db.js';
@@ -20,14 +22,40 @@ export const createBooking = async (req, res, next) => {
       travelers,
       contactInfo,
       totalPrice,
-      paymentMethod,
+      paymentMethod = 'Travel Digital Wallet',
     } = req.body;
     const bookingReference = generatePNR();
     const transactionId = `TXN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const userId = (req.user.id || req.user._id || '').toString();
 
+    // 0. Verify and deduct funds from customer's Travel Digital Wallet
+    let currentBalance = 0;
+    if (isDbConnected()) {
+      const uRes = await query('SELECT wallet_balance FROM users WHERE id = $1', [userId]);
+      currentBalance = uRes.rows.length > 0 ? Number(uRes.rows[0].wallet_balance || 0) : 1000;
+    } else if (mongoose.connection.readyState === 1) {
+      const uDoc = await User.findById(userId);
+      currentBalance = uDoc ? Number(uDoc.walletBalance || 0) : 1000;
+    } else {
+      const uMem = memoryStore.users.find((u) => (u.id || u._id || '').toString() === userId);
+      currentBalance = uMem ? Number(uMem.walletBalance ?? 1000) : 1000;
+    }
+
+    if (currentBalance < totalPrice) {
+      return res.status(400).json({
+        success: false,
+        code: 'INSUFFICIENT_WALLET_BALANCE',
+        message: `Insufficient wallet balance ($${currentBalance.toFixed(2)} available, $${totalPrice.toFixed(2)} required). Please top up your wallet to complete this reservation.`,
+        availableBalance: currentBalance,
+        requiredAmount: totalPrice,
+      });
+    }
+
+    const newBalance = currentBalance - totalPrice;
+    const debitDescription = `Payment for ${type.toUpperCase()} reservation (${bookingReference})`;
+
     const payment = {
-      method: paymentMethod || 'Online Payment',
+      method: paymentMethod || 'Travel Digital Wallet',
       transactionId,
       status: 'PAID',
       paidAt: new Date().toISOString(),
@@ -35,6 +63,15 @@ export const createBooking = async (req, res, next) => {
 
     // 1. PostgreSQL Persistent Storage
     if (isDbConnected()) {
+      // Deduct wallet balance
+      await query('UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2', [newBalance, userId]);
+      const txId = `wtx-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+      await query(
+        `INSERT INTO wallet_transactions (id, user_id, type, amount, balance_before, balance_after, payment_method, reference_id, description)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [txId, userId, 'DEBIT_BOOKING', totalPrice, currentBalance, newBalance, payment.method, bookingReference, debitDescription],
+      );
+
       const id = `bk-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
       const result = await query(
         `INSERT INTO bookings (id, booking_reference, user_id, booking_type, item_details, travelers, contact_info, total_price, currency, status, payment)
@@ -69,6 +106,7 @@ export const createBooking = async (req, res, next) => {
         status: row.status,
         paymentStatus: row.payment?.status || 'PAID',
         payment: row.payment,
+        walletBalance: newBalance,
         createdAt: row.created_at,
         user: {
           _id: req.user.id || req.user._id,
@@ -90,6 +128,18 @@ export const createBooking = async (req, res, next) => {
 
     // 2. MongoDB Fallback
     if (mongoose.connection.readyState === 1) {
+      await User.findByIdAndUpdate(userId, { walletBalance: newBalance });
+      await WalletTransaction.create({
+        userId,
+        type: 'DEBIT_BOOKING',
+        amount: totalPrice,
+        balanceBefore: currentBalance,
+        balanceAfter: newBalance,
+        paymentMethod: payment.method,
+        referenceId: bookingReference,
+        description: debitDescription,
+      });
+
       const booking = await Booking.create({
         user: req.user._id,
         bookingReference,
@@ -110,11 +160,37 @@ export const createBooking = async (req, res, next) => {
       return res.status(201).json({
         success: true,
         message: 'Booking submitted successfully! Reservation is pending admin confirmation.',
-        data: booking,
+        data: {
+          ...booking.toObject(),
+          walletBalance: newBalance,
+        },
       });
     }
 
     // 3. Memory fallback
+    const memUser = memoryStore.users.find((u) => (u.id || u._id || '').toString() === userId);
+    if (memUser) {
+      memUser.walletBalance = newBalance;
+    }
+
+    const txId = `wtx-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+    if (!memoryStore.walletTransactions) {
+      memoryStore.walletTransactions = [];
+    }
+    memoryStore.walletTransactions.unshift({
+      _id: txId,
+      id: txId,
+      userId,
+      type: 'DEBIT_BOOKING',
+      amount: totalPrice,
+      balanceBefore: currentBalance,
+      balanceAfter: newBalance,
+      paymentMethod: payment.method,
+      referenceId: bookingReference,
+      description: debitDescription,
+      createdAt: new Date(),
+    });
+
     const newBooking = {
       _id: `bk-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
       user: {
@@ -133,6 +209,7 @@ export const createBooking = async (req, res, next) => {
       status: 'PENDING',
       paymentStatus: 'PAID',
       payment,
+      walletBalance: newBalance,
       createdAt: new Date(),
     };
 
@@ -322,9 +399,42 @@ export const cancelBooking = async (req, res, next) => {
         return res.status(400).json({ success: false, message: 'This booking has already been cancelled.' });
       }
 
+      // Refund to user's Travel Digital Wallet if booking was paid
+      const refundAmount = Number(row.total_price || 0);
+      let updatedWalletBalance = 0;
+      if (refundAmount > 0 && row.payment?.status === 'PAID') {
+        const uRes = await query('SELECT wallet_balance FROM users WHERE id = $1', [row.user_id]);
+        const balBefore = uRes.rows.length > 0 ? Number(uRes.rows[0].wallet_balance || 0) : 1000;
+        updatedWalletBalance = balBefore + refundAmount;
+        await query('UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2', [updatedWalletBalance, row.user_id]);
+
+        const txId = `wtx-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+        await query(
+          `INSERT INTO wallet_transactions (id, user_id, type, amount, balance_before, balance_after, payment_method, reference_id, description)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            txId,
+            row.user_id,
+            'REFUND_BOOKING',
+            refundAmount,
+            balBefore,
+            updatedWalletBalance,
+            'Travel Digital Wallet',
+            row.booking_reference,
+            `Refund for cancelled ${row.booking_type.toUpperCase()} reservation (${row.booking_reference})`,
+          ],
+        );
+      }
+
+      const updatedPayment = {
+        ...row.payment,
+        status: 'REFUNDED',
+        refundedAt: new Date().toISOString(),
+      };
+
       const updateRes = await query(
-        'UPDATE bookings SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
-        ['CANCELLED', row.id],
+        'UPDATE bookings SET status = $1, payment = $2, updated_at = NOW() WHERE id = $3 RETURNING *',
+        ['CANCELLED', JSON.stringify(updatedPayment), row.id],
       );
 
       const updatedRow = updateRes.rows[0];
@@ -339,8 +449,9 @@ export const cancelBooking = async (req, res, next) => {
         totalPrice: Number(updatedRow.total_price),
         currency: updatedRow.currency,
         status: updatedRow.status,
-        paymentStatus: updatedRow.payment?.status || 'PAID',
-        payment: updatedRow.payment,
+        paymentStatus: 'REFUNDED',
+        payment: updatedPayment,
+        walletBalance: updatedWalletBalance,
         createdAt: updatedRow.created_at,
         user: {
           _id: row.user_id,
@@ -355,7 +466,7 @@ export const cancelBooking = async (req, res, next) => {
 
       return res.status(200).json({
         success: true,
-        message: 'Booking has been successfully cancelled.',
+        message: `Booking has been cancelled and $${refundAmount.toFixed(2)} was refunded to the user's Travel Digital Wallet.`,
         data: updatedBooking,
       });
     }
@@ -371,7 +482,34 @@ export const cancelBooking = async (req, res, next) => {
         return res.status(400).json({ success: false, message: 'This booking has already been cancelled.' });
       }
 
+      const refundAmount = Number(booking.totalPrice || 0);
+      let updatedWalletBalance = 0;
+      if (refundAmount > 0 && booking.paymentStatus === 'PAID') {
+        const uDoc = await User.findById(booking.user);
+        const balBefore = uDoc ? Number(uDoc.walletBalance || 0) : 1000;
+        updatedWalletBalance = balBefore + refundAmount;
+        if (uDoc) {
+          uDoc.walletBalance = updatedWalletBalance;
+          await uDoc.save();
+        }
+
+        await WalletTransaction.create({
+          userId: booking.user,
+          type: 'REFUND_BOOKING',
+          amount: refundAmount,
+          balanceBefore: balBefore,
+          balanceAfter: updatedWalletBalance,
+          paymentMethod: 'Travel Digital Wallet',
+          referenceId: booking.bookingReference,
+          description: `Refund for cancelled ${booking.type.toUpperCase()} reservation (${booking.bookingReference})`,
+        });
+      }
+
       booking.status = 'CANCELLED';
+      booking.paymentStatus = 'REFUNDED';
+      if (booking.payment) {
+        booking.payment.status = 'REFUNDED';
+      }
       await booking.save();
       await booking.populate('user', 'name email phone');
 
@@ -379,8 +517,11 @@ export const cancelBooking = async (req, res, next) => {
 
       return res.status(200).json({
         success: true,
-        message: 'Booking has been successfully cancelled.',
-        data: booking,
+        message: `Booking has been cancelled and $${refundAmount.toFixed(2)} was refunded to the user's Travel Digital Wallet.`,
+        data: {
+          ...booking.toObject(),
+          walletBalance: updatedWalletBalance,
+        },
       });
     }
 
@@ -397,12 +538,44 @@ export const cancelBooking = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'This booking has already been cancelled.' });
     }
 
+    const refundAmount = Number(booking.totalPrice || 0);
+    const uMem = memoryStore.users.find((u) => (u.id || u._id || '').toString() === bUser);
+    const balBefore = uMem ? Number(uMem.walletBalance ?? 1000) : 1000;
+    const updatedWalletBalance = balBefore + refundAmount;
+
+    if (uMem && refundAmount > 0 && booking.paymentStatus === 'PAID') {
+      uMem.walletBalance = updatedWalletBalance;
+      const txId = `wtx-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+      if (!memoryStore.walletTransactions) {
+        memoryStore.walletTransactions = [];
+      }
+      memoryStore.walletTransactions.unshift({
+        _id: txId,
+        id: txId,
+        userId: bUser,
+        type: 'REFUND_BOOKING',
+        amount: refundAmount,
+        balanceBefore: balBefore,
+        balanceAfter: updatedWalletBalance,
+        paymentMethod: 'Travel Digital Wallet',
+        referenceId: booking.bookingReference,
+        description: `Refund for cancelled ${booking.type.toUpperCase()} reservation (${booking.bookingReference})`,
+        createdAt: new Date(),
+      });
+    }
+
     booking.status = 'CANCELLED';
+    booking.paymentStatus = 'REFUNDED';
+    if (booking.payment) {
+      booking.payment.status = 'REFUNDED';
+    }
+    booking.walletBalance = updatedWalletBalance;
+
     notifyAdminClients('booking_updated', booking);
 
     return res.status(200).json({
       success: true,
-      message: 'Booking has been successfully cancelled.',
+      message: `Booking has been cancelled and $${refundAmount.toFixed(2)} was refunded to the user's Travel Digital Wallet.`,
       data: booking,
     });
   } catch (error) {

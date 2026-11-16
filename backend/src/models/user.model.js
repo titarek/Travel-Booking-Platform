@@ -43,6 +43,11 @@ const userSchema = new mongoose.Schema(
       select: false,
       default: '',
     },
+    walletBalance: {
+      type: Number,
+      default: 1000,
+      min: [0, 'Wallet balance cannot be negative'],
+    },
   },
   {
     timestamps: true,

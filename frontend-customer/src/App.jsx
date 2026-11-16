@@ -7,6 +7,7 @@ import { FlightsPage } from './pages/FlightsPage.jsx';
 import { HotelsPage } from './pages/HotelsPage.jsx';
 import { PackagesPage } from './pages/PackagesPage.jsx';
 import { MyBookingsPage } from './pages/MyBookingsPage.jsx';
+import { ProfilePage } from './pages/ProfilePage.jsx';
 import { NotFoundPage } from './pages/NotFoundPage.jsx';
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="/hotels" element={<HotelsPage />} />
           <Route path="/packages" element={<PackagesPage />} />
           <Route path="/my-bookings" element={<MyBookingsPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>

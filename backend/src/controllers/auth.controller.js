@@ -72,6 +72,7 @@ export const register = async (req, res, next) => {
           email: createdUser.email,
           phone: createdUser.phone,
           role: 'CUSTOMER',
+          walletBalance: 1000,
         },
       });
     }
@@ -109,6 +110,7 @@ export const register = async (req, res, next) => {
           email: user.email,
           phone: user.phone,
           role: 'CUSTOMER',
+          walletBalance: 1000,
         },
       });
     }
@@ -132,6 +134,7 @@ export const register = async (req, res, next) => {
       role: 'CUSTOMER',
       securityQuestion: securityQuestion || '',
       securityAnswerHash,
+      walletBalance: 1000,
       createdAt: new Date(),
     };
     memoryStore.users.push(newUser);
@@ -149,6 +152,7 @@ export const register = async (req, res, next) => {
         email: newUser.email,
         phone: newUser.phone,
         role: 'CUSTOMER',
+        walletBalance: 1000,
       },
     });
   } catch (error) {
@@ -171,7 +175,7 @@ export const login = async (req, res, next) => {
     // 1. PostgreSQL Persistent Lookup
     if (isDbConnected()) {
       const result = await query(
-        `SELECT id, name, email, password_hash, role, phone, security_question, created_at
+        `SELECT id, name, email, password_hash, role, phone, wallet_balance, security_question, created_at
          FROM users WHERE LOWER(email) = LOWER($1)`,
         [normalizedEmail],
       );
@@ -186,6 +190,7 @@ export const login = async (req, res, next) => {
           email: row.email,
           phone: row.phone,
           role: (row.role || 'CUSTOMER').toUpperCase(),
+          walletBalance: Number(row.wallet_balance != null ? row.wallet_balance : 1000),
           createdAt: row.created_at,
         };
       }
@@ -201,6 +206,7 @@ export const login = async (req, res, next) => {
           email: mongoUser.email,
           phone: mongoUser.phone,
           role: (mongoUser.role || 'CUSTOMER').toUpperCase(),
+          walletBalance: Number(mongoUser.walletBalance != null ? mongoUser.walletBalance : 1000),
         };
       }
     } else {
@@ -217,6 +223,7 @@ export const login = async (req, res, next) => {
           email: memUser.email,
           phone: memUser.phone,
           role: (memUser.role || 'CUSTOMER').toUpperCase(),
+          walletBalance: Number(memUser.walletBalance != null ? memUser.walletBalance : 1000),
         };
       }
     }
@@ -249,6 +256,7 @@ export const login = async (req, res, next) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        walletBalance: user.walletBalance,
       },
     });
   } catch (error) {
@@ -270,6 +278,7 @@ export const getMe = async (req, res) => {
       email: req.user.email,
       phone: req.user.phone,
       role,
+      walletBalance: Number(req.user.walletBalance != null ? req.user.walletBalance : 1000),
       createdAt: req.user.createdAt || req.user.created_at,
     },
   });
@@ -406,6 +415,251 @@ export const resetPasswordWithSecurityAnswer = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: 'Password reset successful! You can now sign in with your new password.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Update authenticated user personal profile
+ */
+export const updateProfile = async (req, res, next) => {
+  try {
+    const userId = (req.user.id || req.user._id || '').toString();
+    const { name, phone, securityQuestion, securityAnswer } = req.body;
+
+    let securityAnswerHash = null;
+    if (securityAnswer && securityAnswer.trim()) {
+      securityAnswerHash = await bcrypt.hash(securityAnswer.toLowerCase().trim(), 12);
+    }
+
+    let updatedUser = null;
+
+    if (isDbConnected()) {
+      let queryStr = 'UPDATE users SET name = COALESCE($1, name), phone = COALESCE($2, phone), security_question = COALESCE($3, security_question), updated_at = NOW()';
+      const params = [name || null, phone || null, securityQuestion || null];
+
+      if (securityAnswerHash) {
+        queryStr += ', security_answer_hash = $4 WHERE id = $5 RETURNING id, name, email, phone, role, security_question, wallet_balance, created_at';
+        params.push(securityAnswerHash, userId);
+      } else {
+        queryStr += ' WHERE id = $4 RETURNING id, name, email, phone, role, security_question, wallet_balance, created_at';
+        params.push(userId);
+      }
+
+      const pgRes = await query(queryStr, params);
+      if (pgRes.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+      const row = pgRes.rows[0];
+      updatedUser = {
+        id: row.id,
+        _id: row.id,
+        name: row.name,
+        email: row.email,
+        phone: row.phone,
+        role: (row.role || 'CUSTOMER').toUpperCase(),
+        securityQuestion: row.security_question,
+        walletBalance: Number(row.wallet_balance != null ? row.wallet_balance : 1000),
+        createdAt: row.created_at,
+      };
+    } else if (mongoose.connection.readyState === 1) {
+      const uDoc = await User.findById(userId);
+      if (!uDoc) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+
+      if (name) uDoc.name = name;
+      if (phone !== undefined) uDoc.phone = phone;
+      if (securityQuestion !== undefined) uDoc.securityQuestion = securityQuestion;
+      if (securityAnswerHash) uDoc.securityAnswerHash = securityAnswerHash;
+
+      await uDoc.save();
+      updatedUser = {
+        id: uDoc._id.toString(),
+        _id: uDoc._id.toString(),
+        name: uDoc.name,
+        email: uDoc.email,
+        phone: uDoc.phone,
+        role: (uDoc.role || 'CUSTOMER').toUpperCase(),
+        securityQuestion: uDoc.securityQuestion,
+        walletBalance: Number(uDoc.walletBalance != null ? uDoc.walletBalance : 1000),
+        createdAt: uDoc.createdAt,
+      };
+    } else {
+      const memUser = memoryStore.users.find(
+        (u) => (u.id || u._id || '').toString() === userId,
+      );
+      if (!memUser) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+
+      if (name) memUser.name = name;
+      if (phone !== undefined) memUser.phone = phone;
+      if (securityQuestion !== undefined) memUser.securityQuestion = securityQuestion;
+      if (securityAnswerHash) memUser.securityAnswerHash = securityAnswerHash;
+
+      updatedUser = {
+        id: memUser.id || memUser._id.toString(),
+        _id: memUser.id || memUser._id.toString(),
+        name: memUser.name,
+        email: memUser.email,
+        phone: memUser.phone,
+        role: (memUser.role || 'CUSTOMER').toUpperCase(),
+        securityQuestion: memUser.securityQuestion,
+        walletBalance: Number(memUser.walletBalance != null ? memUser.walletBalance : 1000),
+        createdAt: memUser.createdAt,
+      };
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile information updated successfully.',
+      user: updatedUser,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Change authenticated user email address
+ */
+export const changeEmail = async (req, res, next) => {
+  try {
+    const userId = (req.user.id || req.user._id || '').toString();
+    const { newEmail, currentPassword } = req.body;
+
+    const normalizedEmail = (newEmail || '').toLowerCase().trim();
+    if (!normalizedEmail) {
+      return res.status(400).json({ success: false, message: 'Please provide a valid new email address.' });
+    }
+
+    let passwordHash = null;
+
+    if (isDbConnected()) {
+      // Check collision
+      const checkRes = await query('SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id != $2', [normalizedEmail, userId]);
+      if (checkRes.rows.length > 0) {
+        return res.status(409).json({ success: false, message: 'An account with this email address already exists.' });
+      }
+
+      const userRes = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+      if (userRes.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+      passwordHash = userRes.rows[0].password_hash;
+    } else if (mongoose.connection.readyState === 1) {
+      const existing = await User.findOne({ email: normalizedEmail, _id: { $ne: userId } });
+      if (existing) {
+        return res.status(409).json({ success: false, message: 'An account with this email address already exists.' });
+      }
+
+      const uDoc = await User.findById(userId).select('+passwordHash');
+      if (!uDoc) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+      passwordHash = uDoc.passwordHash;
+    } else {
+      const existing = memoryStore.users.find(
+        (u) => u.email.toLowerCase() === normalizedEmail && (u.id || u._id || '').toString() !== userId,
+      );
+      if (existing) {
+        return res.status(409).json({ success: false, message: 'An account with this email address already exists.' });
+      }
+
+      const memUser = memoryStore.users.find((u) => (u.id || u._id || '').toString() === userId);
+      if (!memUser) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+      passwordHash = memUser.passwordHash;
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, passwordHash);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Incorrect current password. Verification failed.',
+      });
+    }
+
+    // Apply email update
+    if (isDbConnected()) {
+      await query('UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2', [normalizedEmail, userId]);
+    } else if (mongoose.connection.readyState === 1) {
+      await User.findByIdAndUpdate(userId, { email: normalizedEmail });
+    } else {
+      const memUser = memoryStore.users.find((u) => (u.id || u._id || '').toString() === userId);
+      if (memUser) memUser.email = normalizedEmail;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Account email address has been updated successfully.',
+      email: normalizedEmail,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Change authenticated user password
+ */
+export const changePassword = async (req, res, next) => {
+  try {
+    const userId = (req.user.id || req.user._id || '').toString();
+    const { currentPassword, newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 6 characters.' });
+    }
+
+    let passwordHash = null;
+
+    if (isDbConnected()) {
+      const userRes = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+      if (userRes.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+      passwordHash = userRes.rows[0].password_hash;
+    } else if (mongoose.connection.readyState === 1) {
+      const uDoc = await User.findById(userId).select('+passwordHash');
+      if (!uDoc) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+      passwordHash = uDoc.passwordHash;
+    } else {
+      const memUser = memoryStore.users.find((u) => (u.id || u._id || '').toString() === userId);
+      if (!memUser) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+      passwordHash = memUser.passwordHash;
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, passwordHash);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Incorrect current password. Password change denied.',
+      });
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPassword, 12);
+
+    if (isDbConnected()) {
+      await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newPasswordHash, userId]);
+    } else if (mongoose.connection.readyState === 1) {
+      await User.findByIdAndUpdate(userId, { passwordHash: newPasswordHash });
+    } else {
+      const memUser = memoryStore.users.find((u) => (u.id || u._id || '').toString() === userId);
+      if (memUser) memUser.passwordHash = newPasswordHash;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Your password has been changed successfully.',
     });
   } catch (error) {
     return next(error);
