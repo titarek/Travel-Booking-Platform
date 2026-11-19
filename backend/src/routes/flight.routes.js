@@ -30,7 +30,7 @@ const searchFlightSchema = {
 
 const flightIdSchema = {
   params: z.object({
-    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid flight ID format'),
+    id: z.string().min(1).max(100),
   }).strict(),
 };
 
