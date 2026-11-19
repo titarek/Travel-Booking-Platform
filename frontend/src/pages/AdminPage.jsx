@@ -40,6 +40,11 @@ import {
   Globe,
   Code,
   Wallet,
+  BookOpen,
+  Layers,
+  Zap,
+  Server,
+  DollarSign,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
@@ -92,7 +97,8 @@ const res = await fetch("${origin}/api/v1/b2b/flights/search?origin=DAC&destinat
 const flights = await res.json();
 console.log("Wholesale Flight Results:", flights.data);`;
   }
-  return `# Python (requests) Programmatic B2B Integration
+  if (lang === 'python') {
+    return `# Python (requests) Programmatic B2B Integration
 import requests
 
 url = "${origin}/api/v1/b2b/flights/search"
@@ -101,6 +107,181 @@ headers = {"x-api-key": "trav_live_b2b_expedia_9a8f27c3"}
 
 response = requests.get(url, params=params, headers=headers)
 print("Wholesale Inventory:", response.json())`;
+  }
+  if (lang === 'php') {
+    return `<?php
+// PHP cURL Programmatic B2B Integration
+$ch = curl_init("${origin}/api/v1/b2b/flights/search?origin=DAC&destination=DXB");
+curl_setopt($ch, CURLOPT_HTTPHEADER, [
+    "x-api-key: trav_live_b2b_expedia_9a8f27c3",
+    "Content-Type: application/json"
+]);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+$response = json_decode(curl_exec($ch), true);
+curl_close($ch);
+print_r($response['data']);`;
+  }
+  return '';
+};
+
+const B2B_CATEGORY_DATA = {
+  flights: {
+    title: 'Commercial Flight Inventory API',
+    endpoint: '/api/v1/b2b/flights/search',
+    method: 'GET',
+    description: 'Returns real-time airline flight schedules, seat availability, published retail fares, and wholesale discounted net fares.',
+    params: [
+      { name: 'origin', type: 'string', req: true, desc: '3-letter IATA origin airport code (e.g. DAC, JFK, LHR)', example: 'DAC' },
+      { name: 'destination', type: 'string', req: true, desc: '3-letter IATA destination airport code (e.g. DXB, BKK, SIN)', example: 'DXB' },
+      { name: 'date', type: 'string', req: false, desc: 'Flight departure date (YYYY-MM-DD)', example: '2026-11-25' },
+    ],
+    categories: [
+      { field: 'Flight Details', desc: 'Flight number (e.g. BG-047), Operating airline code & full brand name.' },
+      { field: 'Route & Schedule', desc: 'Departure airport & terminal, destination airport & terminal, UTC timestamps, duration, and stops.' },
+      { field: 'Financial Pricing', desc: 'retailPrice (MSRP to show end-user) vs wholesalePrice (net amount billed to your platform account).' },
+      { field: 'Partner Discount', desc: 'Exact contract discount % applied (e.g. 8.5% for Growth, 12% for Enterprise).' },
+      { field: 'Live Seats', desc: 'Real-time remaining seat inventory for immediate confirmation.' },
+    ],
+    sampleResponse: `{
+  "success": true,
+  "partner": "Sky Travel Agency",
+  "count": 1,
+  "data": [
+    {
+      "id": "flt-101",
+      "flightNumber": "BG-047",
+      "airline": {
+        "name": "Biman Bangladesh Airlines",
+        "code": "BG"
+      },
+      "origin": {
+        "code": "DAC",
+        "city": "Dhaka",
+        "airport": "Hazrat Shahjalal Intl",
+        "terminal": "T1"
+      },
+      "destination": {
+        "code": "DXB",
+        "city": "Dubai",
+        "airport": "Dubai International",
+        "terminal": "T3"
+      },
+      "departureTime": "2026-11-25T08:30:00Z",
+      "arrivalTime": "2026-11-25T12:00:00Z",
+      "duration": "5h 30m",
+      "stops": 0,
+      "retailPrice": 420.00,
+      "wholesalePrice": 384.30,
+      "currency": "USD",
+      "partnerDiscountPercent": 8.5,
+      "availableSeats": 7
+    }
+  ]
+}`,
+  },
+  hotels: {
+    title: 'Hotels & Luxury Resorts API',
+    endpoint: '/api/v1/b2b/hotels/search',
+    method: 'GET',
+    description: 'Searches verified 3-star to 5-star hotels, luxury suites, and Umrah accommodations with negotiated wholesale rates.',
+    params: [
+      { name: 'city', type: 'string', req: false, desc: 'City name or destination (e.g. Dubai, Cox\'s Bazar, Mecca)', example: 'Dubai' },
+      { name: 'country', type: 'string', req: false, desc: 'Country name filter (e.g. United Arab Emirates, Bangladesh)', example: 'United Arab Emirates' },
+    ],
+    categories: [
+      { field: 'Property Identity', desc: 'Hotel ID, verified establishment name, star rating (1 to 5 stars).' },
+      { field: 'Location & Geography', desc: 'City, country, street address coordinates, and landmarks proximity.' },
+      { field: 'Pricing per Night', desc: 'retailPricePerNight (MSRP) vs wholesalePricePerNight (net discounted B2B rate).' },
+      { field: 'Amenities & Inclusions', desc: 'Array of verified amenities (Free WiFi, Breakfast, Private Beach, Pool, Spa).' },
+    ],
+    sampleResponse: `{
+  "success": true,
+  "partner": "Sky Travel Agency",
+  "count": 1,
+  "data": [
+    {
+      "id": "htl-202",
+      "name": "Atlantis, The Palm",
+      "city": "Dubai",
+      "country": "United Arab Emirates",
+      "rating": 5,
+      "retailPricePerNight": 450.00,
+      "wholesalePricePerNight": 411.75,
+      "currency": "USD",
+      "partnerDiscountPercent": 8.5,
+      "amenities": [
+        "Free High-Speed WiFi",
+        "Private Beach Access",
+        "Aquaventure Waterpark",
+        "Luxury Spa & Fitness"
+      ]
+    }
+  ]
+}`,
+  },
+  booking: {
+    title: 'Programmatic Booking & PNR Issuance API',
+    endpoint: '/api/v1/b2b/bookings/create',
+    method: 'POST',
+    description: 'Executes an instant confirmed reservation with global suppliers, generates an official PNR and digital E-Ticket receipt.',
+    params: [
+      { name: 'serviceType', type: 'string', req: true, desc: 'Type of booking: "flight" | "hotel" | "package"', example: 'flight' },
+      { name: 'itemId', type: 'string', req: true, desc: 'Target flight ID or hotel ID returned by search endpoint', example: 'flt-101' },
+      { name: 'retailPrice', type: 'number', req: true, desc: 'The retail price presented to the end-traveler on your site', example: '420.00' },
+      { name: 'customerEmail', type: 'string', req: true, desc: 'Primary passenger/guest email for confirmation notifications', example: 'customer@external-site.com' },
+      { name: 'customerPhone', type: 'string', req: true, desc: 'Contact phone number with international country code', example: '+8801700000000' },
+      { name: 'travelers', type: 'array', req: true, desc: 'Array of passenger/guest objects with firstName, lastName, passport', example: '[{ "firstName": "Tarek", "lastName": "Ahmed" }]' },
+    ],
+    categories: [
+      { field: 'Official PNR Reference', desc: 'Unique 6-digit airline/hotel booking reference (e.g. TRV-923117 or B2B-839201).' },
+      { field: 'Financial Settlement', desc: 'wholesaleNetPaid deducted from wholesale balance + savings (your gross commission profit).' },
+      { field: 'Booking Status', desc: 'CONFIRMED with live supplier synchronization.' },
+      { field: 'E-Ticket Link', desc: 'Direct printable electronic ticket URL and QR verification code.' },
+    ],
+    sampleResponse: `{
+  "success": true,
+  "message": "B2B programmatic booking successfully confirmed.",
+  "data": {
+    "bookingReference": "B2B-839201",
+    "partner": "Sky Travel Agency",
+    "serviceType": "flight",
+    "status": "CONFIRMED",
+    "wholesaleNetPaid": 384.30,
+    "retailListedPrice": 420.00,
+    "savings": 35.70,
+    "eTicketUrl": "/api/bookings/bk-b2b-1795123901"
+  }
+}`,
+  },
+  telemetry: {
+    title: 'Partner Health, Quota & Margin Telemetry API',
+    endpoint: '/api/v1/b2b/status',
+    method: 'GET',
+    description: 'Retrieves partner account telemetry, assigned commission margins, remaining rate limit quota, and webhook health.',
+    params: [
+      { name: 'x-api-key', type: 'header', req: true, desc: 'Your provisioned B2B API secret key passed in HTTP header', example: 'trav_live_b2b_skytrial_...' },
+    ],
+    categories: [
+      { field: 'Partner Profile', desc: 'Registered company name, technical contact email, account tier.' },
+      { field: 'Contract Margins', desc: 'Current active wholesale discount percentage.' },
+      { field: 'Rate Limits', desc: 'Hourly allocated requests (e.g. 9,600 req/hr) and burst capacity.' },
+      { field: 'Aggregated Metrics', desc: 'totalRequests executed, totalRevenue wholesale volume processed.' },
+    ],
+    sampleResponse: `{
+  "success": true,
+  "partner": {
+    "name": "Sky Travel Agency",
+    "contactEmail": "tech@skytravel.com",
+    "tier": "GROWTH",
+    "status": "ACTIVE",
+    "commissionDiscount": 8.5,
+    "rateLimit": 9600,
+    "totalRequests": 1840,
+    "totalRevenue": 6420.00,
+    "webhookUrl": "https://skytravel.com/api/travel-webhooks"
+  }
+}`,
+  },
 };
 
 const CLIENT_PORTAL_URL = import.meta.env.VITE_CLIENT_PORTAL_URL || 'https://travel-booking-platform-u2vi.vercel.app/';
@@ -148,6 +329,8 @@ export const AdminPage = () => {
   const [b2bModalOpen, setB2bModalOpen] = useState(false);
   const [b2bModalSubmitting, setB2bModalSubmitting] = useState(false);
   const [b2bCodeTab, setB2bCodeTab] = useState('curl');
+  const [b2bGuideTab, setB2bGuideTab] = useState('categories');
+  const [b2bCategoryTab, setB2bCategoryTab] = useState('flights');
   const [newB2BPartner, setNewB2BPartner] = useState({
     name: '',
     contactEmail: '',
@@ -3132,76 +3315,368 @@ export const AdminPage = () => {
             </div>
 
             {/* Developer Documentation & Integration Sandbox */}
-            <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 shadow-xl text-white space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 sm:p-8 shadow-xl text-white space-y-6">
+              {/* Header & Main Guide Tab Switcher */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <Code className="h-5 w-5 text-brand-400" />
-                    <h3 className="text-sm font-black uppercase tracking-wider text-white">
-                      Integration SDK &amp; Programmatic Endpoints
+                    <BookOpen className="h-5 w-5 text-brand-400" />
+                    <h3 className="text-base font-black uppercase tracking-wider text-white">
+                      How to Integrate &amp; B2B Wholesale API Developer Guide
                     </h3>
                   </div>
                   <p className="text-xs text-slate-400">
-                    Sample integration code for client platforms connecting via API key.
+                    Comprehensive schema reference, response categories, and multi-site integration blueprints.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700">
-                  {['curl', 'node', 'python'].map((lang) => (
+                <div className="flex items-center gap-1.5 bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700/80">
+                  <button
+                    type="button"
+                    onClick={() => setB2bGuideTab('categories')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      b2bGuideTab === 'categories'
+                        ? 'bg-brand-500 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Layers className="h-3.5 w-3.5" />
+                    <span>Data Categories &amp; Schemas</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setB2bGuideTab('architecture')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      b2bGuideTab === 'architecture'
+                        ? 'bg-brand-500 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Server className="h-3.5 w-3.5" />
+                    <span>How to Utilize on Another Site</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setB2bGuideTab('code')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      b2bGuideTab === 'code'
+                        ? 'bg-brand-500 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Code className="h-3.5 w-3.5" />
+                    <span>Code Snippets</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* GUIDE TAB 1: DATA CATEGORIES & RESPONSE SCHEMAS */}
+              {b2bGuideTab === 'categories' && (
+                <div className="space-y-5">
+                  {/* Category Selector Pills */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {[
+                      { id: 'flights', label: '1. Flights Search API', icon: Plane },
+                      { id: 'hotels', label: '2. Hotels Search API', icon: Building2 },
+                      { id: 'booking', label: '3. Programmatic Booking API', icon: Ticket },
+                      { id: 'telemetry', label: '4. Quota & Status Telemetry', icon: Activity },
+                    ].map((cat) => {
+                      const Icon = cat.icon;
+                      const active = b2bCategoryTab === cat.id;
+                      return (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => setB2bCategoryTab(cat.id)}
+                          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border ${
+                            active
+                              ? 'bg-brand-600 text-white border-brand-500 shadow-sm'
+                              : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          <Icon className={`h-3.5 w-3.5 ${active ? 'text-white' : 'text-slate-400'}`} />
+                          <span>{cat.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Category Details & Documentation Box */}
+                  {B2B_CATEGORY_DATA[b2bCategoryTab] && (
+                    <div className="space-y-4 bg-slate-950/60 rounded-2xl border border-slate-800 p-5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                        <div>
+                          <div className="flex items-center gap-2.5">
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                              B2B_CATEGORY_DATA[b2bCategoryTab].method === 'GET'
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                : 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
+                            }`}
+                            >
+                              {B2B_CATEGORY_DATA[b2bCategoryTab].method}
+                            </span>
+                            <span className="font-mono text-sm font-bold text-slate-200">
+                              {B2B_CATEGORY_DATA[b2bCategoryTab].endpoint}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">
+                            {B2B_CATEGORY_DATA[b2bCategoryTab].description}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[11px] font-mono text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20 block">
+                            Header: x-api-key: YOUR_KEY
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Request Parameters Table */}
+                      <div className="space-y-2">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 block">
+                          Request Parameters &amp; Query Schema
+                        </span>
+                        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-black/40">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b border-slate-800 text-slate-400 uppercase text-[10px] font-bold">
+                                <th className="py-2 px-3">Parameter</th>
+                                <th className="py-2 px-3">Type</th>
+                                <th className="py-2 px-3">Requirement</th>
+                                <th className="py-2 px-3">Description</th>
+                                <th className="py-2 px-3">Example</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+                              {B2B_CATEGORY_DATA[b2bCategoryTab].params.map((p) => (
+                                <tr key={p.name} className="hover:bg-slate-900/60">
+                                  <td className="py-2 px-3 text-brand-300 font-bold">{p.name}</td>
+                                  <td className="py-2 px-3 text-slate-400">{p.type}</td>
+                                  <td className="py-2 px-3">
+                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                      p.req ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-700/50 text-slate-400'
+                                    }`}
+                                    >
+                                      {p.req ? 'Required' : 'Optional'}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-3 text-slate-300 font-sans text-xs">{p.desc}</td>
+                                  <td className="py-2 px-3 text-emerald-400">{p.example}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Data Categories Breakdown */}
+                      <div className="space-y-2 pt-2">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 block">
+                          Data Categories Provided in API Response
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                          {B2B_CATEGORY_DATA[b2bCategoryTab].categories.map((c) => (
+                            <div key={c.field} className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+                              <span className="text-xs font-bold text-brand-300 flex items-center gap-1">
+                                <Check className="h-3 w-3 text-emerald-400" />
+                                {c.field}
+                              </span>
+                              <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
+                                {c.desc}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Sample JSON Response Preview */}
+                      <div className="space-y-2 pt-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 block">
+                            Live Response Payload Schema (JSON)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(B2B_CATEGORY_DATA[b2bCategoryTab].sampleResponse);
+                              showToast('JSON schema copied to clipboard!');
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-300 border border-slate-700 transition-colors flex items-center gap-1"
+                          >
+                            <Copy className="h-3 w-3" />
+                            <span>Copy Schema</span>
+                          </button>
+                        </div>
+                        <pre className="p-4 rounded-xl bg-black border border-slate-800 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed max-h-72">
+                          {B2B_CATEGORY_DATA[b2bCategoryTab].sampleResponse}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* GUIDE TAB 2: HOW TO UTILIZE ON ANOTHER SITE */}
+              {b2bGuideTab === 'architecture' && (
+                <div className="space-y-6">
+                  {/* High-level Blueprint Intro */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-brand-900/40 via-indigo-900/30 to-slate-900 border border-brand-500/30 space-y-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-brand-300 block">
+                      Architecture Blueprint: Integrating with Third-Party Websites &amp; OTAs
+                    </span>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Connect your external e-commerce platform, corporate intranet, or mobile app directly to Travel&apos;s wholesale inventory engine. Below is the standard production integration flow used by high-volume resellers and aggregators.
+                    </p>
+                  </div>
+
+                  {/* 4 Pillars of Multi-Site Utilization */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Pillar 1 */}
+                    <div className="p-5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                      <div className="flex items-center gap-2 text-indigo-400">
+                        <div className="p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
+                          <Server className="h-5 w-5 text-indigo-400" />
+                        </div>
+                        <h4 className="text-sm font-bold text-white">1. Secure Server-Side Proxy</h4>
+                      </div>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        Your frontend (React, Vue, iOS/Android) communicates with your own backend (e.g. <code className="text-brand-300 font-mono">my-ota.com/api/flights</code>). Your server securely appends your <code className="text-brand-300 font-mono">x-api-key</code> and proxies requests to Travel.
+                      </p>
+                      <div className="p-2 rounded-lg bg-black/60 border border-slate-800 text-[11px] text-amber-300 font-mono">
+                        ⚠️ Security Rule: Never expose your B2B API Key in client-side browser code or public GitHub repositories.
+                      </div>
+                    </div>
+
+                    {/* Pillar 2 */}
+                    <div className="p-5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                      <div className="flex items-center gap-2 text-emerald-400">
+                        <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                          <DollarSign className="h-5 w-5 text-emerald-400" />
+                        </div>
+                        <h4 className="text-sm font-bold text-white">2. Automatic Profit &amp; Margin Engine</h4>
+                      </div>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        Every response includes both <code className="text-emerald-400 font-mono">retailPrice</code> (MSRP) and <code className="text-emerald-400 font-mono">wholesalePrice</code> (your discounted net price).
+                      </p>
+                      <div className="p-2.5 rounded-lg bg-black/60 border border-slate-800 text-[11px] text-slate-300 space-y-1">
+                        <div className="flex justify-between">
+                          <span>End-Traveler pays on your site:</span>
+                          <strong className="text-white font-mono">$420.00</strong>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Travel bills your wholesale account:</span>
+                          <strong className="text-emerald-400 font-mono">$384.30</strong>
+                        </div>
+                        <div className="flex justify-between border-t border-slate-800 pt-1 text-brand-300 font-bold">
+                          <span>Your Immediate Retained Profit:</span>
+                          <span className="font-mono">+$35.70 (8.5% Net)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Pillar 3 */}
+                    <div className="p-5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                      <div className="flex items-center gap-2 text-sky-400">
+                        <div className="p-2 rounded-xl bg-sky-500/10 border border-sky-500/20">
+                          <Zap className="h-5 w-5 text-sky-400" />
+                        </div>
+                        <h4 className="text-sm font-bold text-white">3. Programmatic Checkout &amp; PNR</h4>
+                      </div>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        When the traveler clicks &quot;Pay &amp; Book&quot; on your site, execute <code className="text-sky-300 font-mono">POST /api/v1/b2b/bookings/create</code>. The system automatically confirms the seat with global airline GDS inventory and returns an official PNR (e.g. <code className="text-white font-mono">B2B-839201</code>) and printable digital E-Ticket link.
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Render the returned E-Ticket voucher inside an iframe or send the link to your customer in their confirmation email.
+                      </p>
+                    </div>
+
+                    {/* Pillar 4 */}
+                    <div className="p-5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                      <div className="flex items-center gap-2 text-purple-400">
+                        <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20">
+                          <Layers className="h-5 w-5 text-purple-400" />
+                        </div>
+                        <h4 className="text-sm font-bold text-white">4. Smart Redis Caching &amp; Rate Limits</h4>
+                      </div>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        Cache search queries on your server for 5 to 15 minutes by route key (e.g. <code className="text-purple-300 font-mono">cache:DAC-DXB-20261125</code>).
+                      </p>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        This ensures ultra-fast sub-10ms response times for your visitors and prevents burning through your hourly quota limit (e.g. 9,600 req/hr).
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* GUIDE TAB 3: CODE SNIPPETS & SDK QUICKSTART */}
+              {b2bGuideTab === 'code' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-300">
+                      Select Programming Language / Framework:
+                    </span>
+                    <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700">
+                      {['curl', 'node', 'python', 'php'].map((lang) => (
+                        <button
+                          key={lang}
+                          type="button"
+                          onClick={() => setB2bCodeTab(lang)}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all uppercase ${
+                            b2bCodeTab === lang
+                              ? 'bg-brand-500 text-white shadow-xs'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {lang === 'node' ? 'Node.js' : lang}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Code Snippet Box */}
+                  <div className="relative">
+                    <pre className="p-4 rounded-2xl bg-black/60 border border-slate-800 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed">
+                      {getB2BSnippet(b2bCodeTab)}
+                    </pre>
                     <button
-                      key={lang}
                       type="button"
-                      onClick={() => setB2bCodeTab(lang)}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all uppercase ${
-                        b2bCodeTab === lang
-                          ? 'bg-brand-500 text-white shadow-xs'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
+                      onClick={() => {
+                        navigator.clipboard.writeText(getB2BSnippet(b2bCodeTab));
+                        showToast('Code snippet copied to clipboard!');
+                      }}
+                      className="absolute right-3 top-3 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-300 border border-slate-700 transition-colors flex items-center gap-1"
                     >
-                      {lang === 'node' ? 'Node.js' : lang}
+                      <Copy className="h-3 w-3" />
+                      <span>Copy</span>
                     </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Code Snippet Box */}
-              <div className="relative">
-                <pre className="p-4 rounded-2xl bg-black/60 border border-slate-800 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed">
-                  {getB2BSnippet(b2bCodeTab)}
-                </pre>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(getB2BSnippet(b2bCodeTab));
-                    showToast('Code snippet copied to clipboard!');
-                  }}
-                  className="absolute right-3 top-3 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-300 border border-slate-700 transition-colors flex items-center gap-1"
-                >
-                  <Copy className="h-3 w-3" />
-                  <span>Copy</span>
-                </button>
-              </div>
-
-              {/* Endpoints Quick Reference Table */}
-              <div className="pt-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
-                  Standard Public B2B Wholesale Endpoints
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs font-mono">
-                  <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
-                    <span className="text-[10px] text-emerald-400 font-bold block">GET</span>
-                    <span className="text-slate-200">/api/v1/b2b/flights/search</span>
                   </div>
-                  <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
-                    <span className="text-[10px] text-emerald-400 font-bold block">GET</span>
-                    <span className="text-slate-200">/api/v1/b2b/hotels/search</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
-                    <span className="text-[10px] text-brand-400 font-bold block">POST</span>
-                    <span className="text-slate-200">/api/v1/b2b/bookings/create</span>
+
+                  {/* Endpoints Quick Reference Table */}
+                  <div className="pt-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
+                      Standard Public B2B Wholesale Endpoints
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs font-mono">
+                      <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                        <span className="text-[10px] text-emerald-400 font-bold block">GET</span>
+                        <span className="text-slate-200">/api/v1/b2b/flights/search</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                        <span className="text-[10px] text-emerald-400 font-bold block">GET</span>
+                        <span className="text-slate-200">/api/v1/b2b/hotels/search</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                        <span className="text-[10px] text-brand-400 font-bold block">POST</span>
+                        <span className="text-slate-200">/api/v1/b2b/bookings/create</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                        <span className="text-[10px] text-indigo-400 font-bold block">GET</span>
+                        <span className="text-slate-200">/api/v1/b2b/status</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
           )}
