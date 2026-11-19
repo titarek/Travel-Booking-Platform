@@ -5,6 +5,7 @@ import {
   AlertCircle,
   Ticket,
   Printer,
+  Calendar,
   Wallet,
   ArrowRight,
   Plus,
@@ -78,6 +79,43 @@ export const BookingModal = ({
 
   // Confirmation result
   const [confirmedBooking, setConfirmedBooking] = useState(null);
+
+  // International standard booking date handling (IATA 365-day range)
+  const todayStr = new Date().toISOString().split('T')[0];
+  const maxBookingDate = new Date();
+  maxBookingDate.setDate(maxBookingDate.getDate() + 365);
+  const maxDateStr = maxBookingDate.toISOString().split('T')[0];
+
+  const [bookingFlightDate, setBookingFlightDate] = useState(() => {
+    if (item?.departureTime) {
+      try {
+        return new Date(item.departureTime).toISOString().split('T')[0];
+      } catch {
+        return todayStr;
+      }
+    }
+    return todayStr;
+  });
+
+  const handleFlightDateChange = (newDateStr) => {
+    if (!newDateStr) return;
+    setBookingFlightDate(newDateStr);
+    if (item) {
+      try {
+        const oldDep = item.departureTime ? new Date(item.departureTime) : new Date();
+        const [y, m, d] = newDateStr.split('-').map(Number);
+        const newDep = new Date(y, m - 1, d, oldDep.getHours(), oldDep.getMinutes(), 0);
+        item.departureTime = newDep.toISOString();
+        if (item.arrivalTime) {
+          const oldArr = new Date(item.arrivalTime);
+          const diff = Math.max(3600000, oldArr.getTime() - oldDep.getTime());
+          item.arrivalTime = new Date(newDep.getTime() + diff).toISOString();
+        }
+      } catch (err) {
+        console.warn('Could not shift flight time:', err);
+      }
+    }
+  };
 
   // OTP Resend cooldown timer
   useEffect(() => {
@@ -297,6 +335,37 @@ export const BookingModal = ({
                 flightNumber={item.flightNumber}
                 compact
               />
+            )}
+
+            {/* Custom Travel Date Selector (International Guidelines) */}
+            {type === 'flight' && (
+              <div className="p-3.5 bg-brand-50/70 border border-brand-200/90 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-9 w-9 rounded-xl bg-brand-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <Calendar className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-brand-700 block tracking-wider">
+                      Flight Departure Date (IATA Guidelines)
+                    </span>
+                    <strong className="text-xs sm:text-sm font-black text-slate-900 block">
+                      {bookingFlightDate ? new Date(`${bookingFlightDate}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }) : 'Scheduled'}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase">Change Date:</span>
+                  <input
+                    type="date"
+                    min={todayStr}
+                    max={maxDateStr}
+                    value={bookingFlightDate}
+                    onChange={(e) => handleFlightDateChange(e.target.value)}
+                    className="text-xs font-bold border border-slate-200 rounded-xl px-2.5 py-1.5 bg-white focus:outline-none focus:border-brand-500 shadow-xs"
+                  />
+                </div>
+              </div>
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
