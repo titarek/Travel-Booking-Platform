@@ -45,6 +45,7 @@ import {
   Zap,
   Server,
   DollarSign,
+  Smartphone,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
@@ -3773,6 +3774,10 @@ export const AdminPage = () => {
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
                           <div className="h-12 w-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-black">
+                            {service.id === 'otpdev' && <Smartphone className="h-6 w-6 text-emerald-600" />}
+                            {service.id === 'otpdev_template' && <Smartphone className="h-6 w-6 text-indigo-600" />}
+                            {service.id === 'b2b_gateway' && <Globe className="h-6 w-6 text-indigo-600" />}
+                            {service.id === 'postgresql' && <Database className="h-6 w-6 text-blue-600" />}
                             {service.id === 'aviationstack' && <Radio className="h-6 w-6 text-indigo-600" />}
                             {service.id === 'exchangerate' && <CreditCard className="h-6 w-6 text-emerald-600" />}
                             {service.id === 'unsplash' && <Sparkles className="h-6 w-6 text-amber-500" />}
