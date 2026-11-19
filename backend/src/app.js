@@ -19,6 +19,9 @@ import b2bRoutes from './routes/b2b.routes.js';
 
 const app = express();
 
+// Trust reverse proxies (Render, Vercel, Cloudflare) for accurate client IP rate limiting
+app.set('trust proxy', 1);
+
 // Security headers for web protection
 app.use(helmet());
 
