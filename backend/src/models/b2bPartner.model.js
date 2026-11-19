@@ -23,7 +23,7 @@ const b2bPartnerSchema = new mongoose.Schema(
     },
     tier: {
       type: String,
-      enum: ['STARTER', 'GROWTH', 'ENTERPRISE'],
+      enum: ['FREE_TRIAL', 'STARTER', 'GROWTH', 'ENTERPRISE'],
       default: 'GROWTH',
     },
     commissionDiscount: {
@@ -35,7 +35,7 @@ const b2bPartnerSchema = new mongoose.Schema(
     rateLimit: {
       type: Number,
       default: 5000,
-      min: 100,
+      min: 1,
     },
     totalRequests: {
       type: Number,

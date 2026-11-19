@@ -33,6 +33,13 @@ import {
   LogOut,
   ExternalLink,
   XCircle,
+  MapPin,
+  Tag,
+  Ticket,
+  Edit3,
+  Globe,
+  Code,
+  Wallet,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
@@ -40,6 +47,8 @@ import { Button } from '../components/ui/Button.jsx';
 import { Badge } from '../components/ui/Badge.jsx';
 import { Modal } from '../components/ui/Modal.jsx';
 import { Input } from '../components/ui/Input.jsx';
+import { AdminLoginForm } from '../components/auth/AdminLoginForm.jsx';
+import { ETicketModal } from '../components/booking/ETicketModal.jsx';
 import { printTicket } from '../utils/printTicket.js';
 import api from '../api/axios.js';
 
@@ -64,14 +73,47 @@ const exportToCSV = (filename, rows) => {
   document.body.removeChild(link);
 };
 
+const getB2BSnippet = (lang) => {
+  const { origin } = window.location;
+  if (lang === 'curl') {
+    return `curl -X GET "${origin}/api/v1/b2b/flights/search?origin=DAC&destination=DXB" \\
+  -H "x-api-key: trav_live_b2b_expedia_9a8f27c3" \\
+  -H "Content-Type: application/json"`;
+  }
+  if (lang === 'node') {
+    return `// Node.js (v18+) Programmatic B2B Integration
+const res = await fetch("${origin}/api/v1/b2b/flights/search?origin=DAC&destination=DXB", {
+  method: "GET",
+  headers: {
+    "x-api-key": "trav_live_b2b_expedia_9a8f27c3",
+    "Content-Type": "application/json"
+  }
+});
+const flights = await res.json();
+console.log("Wholesale Flight Results:", flights.data);`;
+  }
+  return `# Python (requests) Programmatic B2B Integration
+import requests
+
+url = "${origin}/api/v1/b2b/flights/search"
+params = {"origin": "DAC", "destination": "DXB"}
+headers = {"x-api-key": "trav_live_b2b_expedia_9a8f27c3"}
+
+response = requests.get(url, params=params, headers=headers)
+print("Wholesale Inventory:", response.json())`;
+};
+
+const CLIENT_PORTAL_URL = import.meta.env.VITE_CLIENT_PORTAL_URL || 'https://travel-booking-platform-u2vi.vercel.app/';
+
 export const AdminPage = () => {
   const {
     user,
     logout,
-    openAuthModal,
     currency,
     exchangeRates,
   } = useAuth();
+
+  const isAdmin = Boolean(user && (user.role || '').toUpperCase() === 'ADMIN');
 
   const [activeTab, setActiveTab] = useState('overview');
   const [stats, setStats] = useState(() => {
@@ -94,7 +136,30 @@ export const AdminPage = () => {
   const [hotels, setHotels] = useState([]);
   const [flights, setFlights] = useState([]);
   const [packages, setPackages] = useState([]);
+  const [offers, setOffers] = useState([]);
+  const [b2bPartners, setB2bPartners] = useState([]);
+  const [b2bSettings, setB2bSettings] = useState({
+    enabled: true,
+    defaultDiscount: 8.5,
+    publicApiVersion: 'v1.0.4',
+    sandboxMode: false,
+  });
+  const [b2bSearch, setB2bSearch] = useState('');
+  const [b2bModalOpen, setB2bModalOpen] = useState(false);
+  const [b2bModalSubmitting, setB2bModalSubmitting] = useState(false);
+  const [b2bCodeTab, setB2bCodeTab] = useState('curl');
+  const [newB2BPartner, setNewB2BPartner] = useState({
+    name: '',
+    contactEmail: '',
+    tier: 'GROWTH',
+    commissionDiscount: 8.5,
+    rateLimit: 10000,
+    webhookUrl: '',
+  });
   const [users, setUsers] = useState([]);
+  const [manualDeposits, setManualDeposits] = useState([]);
+  const [depositStatusFilter, setDepositStatusFilter] = useState('ALL');
+  const [processingDepositId, setProcessingDepositId] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
   const [systemHealth, setSystemHealth] = useState(null);
   const [settings, setSettings] = useState({
@@ -127,13 +192,34 @@ export const AdminPage = () => {
   const [hotelSearch, setHotelSearch] = useState('');
   const [flightSearch, setFlightSearch] = useState('');
   const [packageSearch, setPackageSearch] = useState('');
+  const [offerSearch, setOfferSearch] = useState('');
+  const [offerCategoryFilter, setOfferCategoryFilter] = useState('all');
   const [auditSearch, setAuditSearch] = useState('');
 
   // Modals state
   const [hotelModalOpen, setHotelModalOpen] = useState(false);
   const [flightModalOpen, setFlightModalOpen] = useState(false);
   const [packageModalOpen, setPackageModalOpen] = useState(false);
+  const [offerModalOpen, setOfferModalOpen] = useState(false);
+  const [editingOffer, setEditingOffer] = useState(null);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [selectedTicketBooking, setSelectedTicketBooking] = useState(null);
+
+  const [offerFormData, setOfferFormData] = useState({
+    title: '',
+    subtitle: '',
+    tag: '',
+    category: 'special_offer',
+    discount: '',
+    promoCode: '',
+    buttonText: 'Book Now',
+    link: '/flights',
+    gradient: 'from-brand-600 to-sky-700',
+    features: '',
+    validUntil: 'Valid until Dec 2026',
+    active: true,
+    order: 0,
+  });
 
   // Deletion prompt modal with mandatory reason
   const [deleteModal, setDeleteModal] = useState({
@@ -267,20 +353,26 @@ export const AdminPage = () => {
         hotelsRes,
         flightsRes,
         packagesRes,
+        offersRes,
         usersRes,
         logsRes,
         healthRes,
         settingsRes,
         apiKeysRes,
+        b2bRes,
+        depositsRes,
       ] = await Promise.allSettled([
         api.get('/admin/hotels'),
         api.get('/admin/flights'),
         api.get('/admin/packages'),
+        api.get('/admin/offers'),
         api.get('/admin/users'),
         api.get('/admin/logs'),
         api.get('/admin/system/health'),
         api.get('/admin/settings'),
         api.get('/admin/api-keys'),
+        api.get('/b2b/admin/partners'),
+        api.get('/wallet/admin/manual-deposits'),
       ]);
 
       if (hotelsRes.status === 'fulfilled' && hotelsRes.value.data?.data) {
@@ -291,6 +383,9 @@ export const AdminPage = () => {
       }
       if (packagesRes.status === 'fulfilled' && packagesRes.value.data?.data) {
         setPackages(packagesRes.value.data.data);
+      }
+      if (offersRes.status === 'fulfilled' && offersRes.value.data?.data) {
+        setOffers(offersRes.value.data.data);
       }
       if (usersRes.status === 'fulfilled' && usersRes.value.data?.data) {
         setUsers(usersRes.value.data.data);
@@ -306,6 +401,15 @@ export const AdminPage = () => {
       }
       if (apiKeysRes.status === 'fulfilled' && (apiKeysRes.value.data?.services || apiKeysRes.value.data?.data)) {
         setApiServices(apiKeysRes.value.data.services || apiKeysRes.value.data.data || []);
+      }
+      if (b2bRes.status === 'fulfilled' && b2bRes.value.data?.data) {
+        setB2bPartners(b2bRes.value.data.data.partners || []);
+        if (b2bRes.value.data.data.settings) {
+          setB2bSettings(b2bRes.value.data.data.settings);
+        }
+      }
+      if (depositsRes.status === 'fulfilled' && depositsRes.value.data?.data) {
+        setManualDeposits(depositsRes.value.data.data || []);
       }
     } catch {
       showToast('Error syncing administrative data.', 'error');
@@ -509,12 +613,12 @@ export const AdminPage = () => {
   };
 
   useEffect(() => {
-    if (user?.role === 'admin') {
+    if (isAdmin) {
       fetchAdminData();
     } else {
       setLoading(false);
     }
-  }, [user, fetchAdminData]);
+  }, [isAdmin, fetchAdminData]);
 
   // Gentle audio chime for incoming real-time orders
   const playNotificationChime = () => {
@@ -552,10 +656,10 @@ export const AdminPage = () => {
 
   // Real-time live order stream & companion silent poller
   useEffect(() => {
-    if (user?.role !== 'admin') return undefined;
+    if (!isAdmin) return undefined;
 
     let eventSource;
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('travel_token') || localStorage.getItem('token');
     const apiBase = api.defaults.baseURL || 'http://localhost:5000/api';
     const sseUrl = `${apiBase}/admin/realtime?token=${encodeURIComponent(token || '')}`;
 
@@ -636,7 +740,7 @@ export const AdminPage = () => {
       if (eventSource) eventSource.close();
       clearInterval(pollInterval);
     };
-  }, [user]);
+  }, [isAdmin]);
 
   // Booking action handlers
   const handleUpdateBookingStatus = async (bookingId, status, paymentStatus) => {
@@ -847,6 +951,7 @@ export const AdminPage = () => {
       else if (deleteModal.type === 'flight') endpoint = 'flights';
       else if (deleteModal.type === 'package') endpoint = 'packages';
       else if (deleteModal.type === 'booking') endpoint = 'bookings';
+      else if (deleteModal.type === 'offer') endpoint = 'offers';
 
       const res = await api.delete(`/admin/${endpoint}/${deleteModal.id}`, {
         data: { reason: trimmedReason },
@@ -861,6 +966,8 @@ export const AdminPage = () => {
           setPackages((prev) => prev.filter((p) => p._id !== deleteModal.id));
         } else if (deleteModal.type === 'booking') {
           setBookings((prev) => prev.filter((b) => b._id !== deleteModal.id));
+        } else if (deleteModal.type === 'offer') {
+          setOffers((prev) => prev.filter((o) => (o._id || o.id) !== deleteModal.id));
         }
 
         // Add to audit trail log locally
@@ -893,13 +1000,217 @@ export const AdminPage = () => {
     }
   };
 
+  // Offer management handlers
+  const handleOpenCreateOfferModal = () => {
+    setEditingOffer(null);
+    setOfferFormData({
+      title: '',
+      subtitle: '',
+      tag: '',
+      category: 'special_offer',
+      discount: '',
+      promoCode: '',
+      buttonText: 'Book Now',
+      link: '/flights',
+      gradient: 'from-brand-600 to-sky-700',
+      features: '',
+      validUntil: 'Valid until Dec 2026',
+      active: true,
+      order: 0,
+    });
+    setOfferModalOpen(true);
+  };
+
+  const handleOpenEditOfferModal = (offer) => {
+    setEditingOffer(offer);
+    setOfferFormData({
+      title: offer.title || '',
+      subtitle: offer.subtitle || '',
+      tag: offer.tag || '',
+      category: offer.category || 'special_offer',
+      discount: offer.discount || '',
+      promoCode: offer.promoCode || '',
+      buttonText: offer.buttonText || 'Book Now',
+      link: offer.link || '',
+      gradient: offer.gradient || 'from-brand-600 to-sky-700',
+      features: Array.isArray(offer.features) ? offer.features.join('\n') : (offer.features || ''),
+      validUntil: offer.validUntil || 'Valid until Dec 2026',
+      active: offer.active !== false,
+      order: offer.order || 0,
+    });
+    setOfferModalOpen(true);
+  };
+
+  const handleSaveOffer = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        ...offerFormData,
+        features: typeof offerFormData.features === 'string'
+          ? offerFormData.features.split('\n').map((s) => s.trim()).filter(Boolean)
+          : offerFormData.features,
+      };
+
+      if (editingOffer) {
+        const offerId = editingOffer._id || editingOffer.id;
+        const res = await api.put(`/admin/offers/${offerId}`, payload);
+        if (res.data?.success) {
+          setOffers((prev) => prev.map((o) => ((o._id || o.id) === offerId ? res.data.data : o)));
+          setOfferModalOpen(false);
+          showToast(`Offer "${offerFormData.title}" updated successfully.`);
+        }
+      } else {
+        const res = await api.post('/admin/offers', payload);
+        if (res.data?.success) {
+          setOffers((prev) => [res.data.data, ...prev]);
+          setOfferModalOpen(false);
+          showToast(`New offer "${offerFormData.title}" published.`);
+        }
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to save offer.', 'error');
+    }
+  };
+
+  const handleToggleOfferActive = async (offer) => {
+    try {
+      const offerId = offer._id || offer.id;
+      const res = await api.put(`/admin/offers/${offerId}`, {
+        active: !offer.active,
+      });
+      if (res.data?.success) {
+        setOffers((prev) => prev.map((o) => ((o._id || o.id) === offerId ? { ...o, active: !offer.active } : o)));
+        showToast(`Offer "${offer.title}" ${!offer.active ? 'activated' : 'deactivated'}.`);
+      }
+    } catch {
+      showToast('Could not update offer status.', 'error');
+    }
+  };
+
+  // B2B Partner Handlers
+  const handleCreateB2BPartner = async (e) => {
+    e.preventDefault();
+    if (!newB2BPartner.name || !newB2BPartner.contactEmail) {
+      showToast('Partner name and contact email are required.', 'error');
+      return;
+    }
+
+    setB2bModalSubmitting(true);
+    try {
+      const res = await api.post('/b2b/admin/partners', newB2BPartner);
+      if (res.data?.data) {
+        setB2bPartners((prev) => [res.data.data, ...prev]);
+        setB2bModalOpen(false);
+        setNewB2BPartner({
+          name: '',
+          contactEmail: '',
+          tier: 'GROWTH',
+          commissionDiscount: 8.5,
+          rateLimit: 10000,
+          webhookUrl: '',
+        });
+        showToast(`B2B Partner "${res.data.data.name}" provisioned with API Key: ${res.data.data.apiKey}`);
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to provision B2B partner.', 'error');
+    } finally {
+      setB2bModalSubmitting(false);
+    }
+  };
+
+  const handleToggleB2BStatus = async (partner) => {
+    const partnerId = partner._id || partner.id;
+    const nextStatus = partner.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
+    try {
+      const res = await api.patch(`/b2b/admin/partners/${partnerId}`, { status: nextStatus });
+      if (res.data?.success) {
+        setB2bPartners((prev) => prev.map((p) => ((p._id || p.id) === partnerId ? { ...p, status: nextStatus } : p)));
+        showToast(`Partner "${partner.name}" status changed to ${nextStatus}.`);
+      }
+    } catch {
+      showToast('Could not update partner status.', 'error');
+    }
+  };
+
+  const handleRegenerateB2BKey = async (partner) => {
+    const partnerId = partner._id || partner.id;
+    const confirmRegen = window.confirm(`Regenerate API Key for "${partner.name}"? The existing key will stop working immediately.`);
+    if (!confirmRegen) return;
+
+    try {
+      const res = await api.post(`/b2b/admin/partners/${partnerId}/regenerate-key`);
+      if (res.data?.data) {
+        setB2bPartners((prev) => prev.map((p) => ((p._id || p.id) === partnerId ? { ...p, apiKey: res.data.data.apiKey } : p)));
+        showToast(`New API key generated for ${partner.name}!`);
+      }
+    } catch {
+      showToast('Failed to regenerate partner API key.', 'error');
+    }
+  };
+
+  const handleDeleteB2BPartner = async (partner) => {
+    const partnerId = partner._id || partner.id;
+    const confirmDelete = window.confirm(`Revoke and delete B2B partner "${partner.name}"? This action cannot be reversed.`);
+    if (!confirmDelete) return;
+
+    try {
+      const res = await api.delete(`/b2b/admin/partners/${partnerId}`);
+      if (res.data?.success) {
+        setB2bPartners((prev) => prev.filter((p) => (p._id || p.id) !== partnerId));
+        showToast(`Revoked B2B partner "${partner.name}".`);
+      }
+    } catch {
+      showToast('Failed to revoke partner.', 'error');
+    }
+  };
+
+  const handleUpdateB2BSettings = async (updatedFields) => {
+    try {
+      const res = await api.patch('/b2b/admin/settings', updatedFields);
+      if (res.data?.data) {
+        setB2bSettings(res.data.data);
+        showToast('B2B wholesale configuration updated.');
+      }
+    } catch {
+      showToast('Could not update B2B settings.', 'error');
+    }
+  };
+
+  // Manual Deposit Verification Handlers
+  const handleApproveDeposit = async (id) => {
+    setProcessingDepositId(id);
+    try {
+      const res = await api.patch(`/wallet/admin/manual-deposits/${id}/approve`);
+      showToast(res.data?.message || 'Deposit approved and credited to customer wallet!');
+      setManualDeposits((prev) => prev.map((d) => (((d.id || d._id) === id) ? { ...d, status: 'APPROVED' } : d)));
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to approve deposit.', 'error');
+    } finally {
+      setProcessingDepositId(null);
+    }
+  };
+
+  const handleRejectDeposit = async (id) => {
+    setProcessingDepositId(id);
+    try {
+      const res = await api.patch(`/wallet/admin/manual-deposits/${id}/reject`);
+      showToast(res.data?.message || 'Deposit marked as rejected.');
+      setManualDeposits((prev) => prev.map((d) => (((d.id || d._id) === id) ? { ...d, status: 'REJECTED' } : d)));
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to reject deposit.', 'error');
+    } finally {
+      setProcessingDepositId(null);
+    }
+  };
+
   // Toggle user role
   const handleToggleUserRole = async (targetUser) => {
-    const nextRole = targetUser.role === 'admin' ? 'user' : 'admin';
+    const isTargetAdmin = (targetUser.role || '').toUpperCase() === 'ADMIN';
+    const nextRole = isTargetAdmin ? 'CUSTOMER' : 'ADMIN';
     try {
-      const res = await api.patch(`/admin/users/${targetUser._id}/role`, { role: nextRole });
+      const res = await api.patch(`/admin/users/${targetUser._id || targetUser.id}/role`, { role: nextRole });
       if (res.data?.success) {
-        setUsers((prev) => prev.map((u) => (u._id === targetUser._id ? { ...u, role: nextRole } : u)));
+        setUsers((prev) => prev.map((u) => ((u._id || u.id) === (targetUser._id || targetUser.id) ? { ...u, role: nextRole } : u)));
         showToast(`Updated ${targetUser.name}'s role to ${nextRole}.`);
       }
     } catch {
@@ -996,55 +1307,9 @@ export const AdminPage = () => {
     showToast('Audit trail exported to CSV.');
   };
 
-  // Access Gate: If not logged in as Admin, show restricted access (hidden from regular customers)
-  if (!user || user.role !== 'admin') {
-    return (
-      <div className="min-h-[80vh] flex items-center justify-center py-16 px-4">
-        <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-slate-200/80 shadow-2xl space-y-6 text-center animate-in fade-in zoom-in-95 duration-200">
-          <div className="h-16 w-16 rounded-3xl bg-rose-50 border border-rose-100 flex items-center justify-center mx-auto text-rose-600 shadow-sm">
-            <Lock className="h-8 w-8" />
-          </div>
-
-          <div className="space-y-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-rose-600 px-3 py-1 bg-rose-50 rounded-full">
-              Access Restricted
-            </span>
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-              Administrator Portal
-            </h1>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              This area is reserved strictly for authenticated system administrators. Customers and unauthenticated visitors do not have access to platform management facilities.
-            </p>
-          </div>
-
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-left space-y-2 text-xs text-slate-600">
-            <p className="font-semibold text-slate-800">
-              Need administrator access?
-            </p>
-            <p className="text-[11px] text-slate-500 leading-normal">
-              Please sign in using an authorized administrator account to unlock live operations, inventory controls, and audit logs.
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-3">
-            <a
-              href="http://localhost:5173"
-              className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50 transition-colors text-center"
-            >
-              Client Portal (5173)
-            </a>
-            <Button
-              type="button"
-              variant="primary"
-              onClick={() => openAuthModal('login', { adminOnly: true })}
-              className="flex-1 py-2.5 font-bold rounded-xl text-xs bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-500/20"
-            >
-              Sign In to Admin
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
+  // Access Gate: If not logged in as Admin, show direct Administrator Sign In page (no registration)
+  if (!isAdmin) {
+    return <AdminLoginForm />;
   }
 
   if (loading && !stats) {
@@ -1066,6 +1331,19 @@ export const AdminPage = () => {
   }
 
   const commissionEarned = Math.round(((stats?.totalRevenue || 0) * (settings.commissionRate || 5.0)) / 100);
+
+  const filteredOffers = offers.filter((o) => {
+    if (offerCategoryFilter !== 'all' && o.category !== offerCategoryFilter) return false;
+    if (!offerSearch.trim()) return true;
+    const q = offerSearch.toLowerCase();
+    return (
+      (o.title || '').toLowerCase().includes(q)
+      || (o.promoCode || '').toLowerCase().includes(q)
+      || (o.tag || '').toLowerCase().includes(q)
+      || (o.discount || '').toLowerCase().includes(q)
+      || (o.subtitle || '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col lg:flex-row font-sans">
@@ -1107,12 +1385,14 @@ export const AdminPage = () => {
 
           {/* Quick exit to client portal */}
           <a
-            href="http://localhost:5173"
+            href={CLIENT_PORTAL_URL}
+            target="_blank"
+            rel="noopener noreferrer"
             className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all text-xs font-bold group"
           >
             <span className="flex items-center gap-2">
               <ArrowLeft className="h-4 w-4 text-indigo-400 group-hover:-translate-x-1 transition-transform" />
-              <span>Client Portal (Port 5173)</span>
+              <span>Client Portal</span>
             </span>
             <ExternalLink className="h-3.5 w-3.5 text-slate-500" />
           </a>
@@ -1127,9 +1407,18 @@ export const AdminPage = () => {
                 {[
                   { id: 'overview', label: 'Overview', icon: TrendingUp },
                   { id: 'bookings', label: `Bookings (${bookings.length})`, icon: CreditCard },
+                  {
+                    id: 'wallet_deposits',
+                    label: `Wallet Deposits (${manualDeposits.length})`,
+                    icon: Wallet,
+                    badge: manualDeposits.filter((d) => d.status === 'PENDING').length > 0
+                      ? `${manualDeposits.filter((d) => d.status === 'PENDING').length} Pending`
+                      : null,
+                  },
                   { id: 'hotels', label: `Hotels (${hotels.length})`, icon: Building2 },
                   { id: 'flights', label: `Flights (${flights.length})`, icon: Plane },
                   { id: 'packages', label: `Packages (${packages.length})`, icon: PackageIcon },
+                  { id: 'offers', label: `Offers & Promos (${offers.length})`, icon: Tag },
                 ].map((item) => {
                   const Icon = item.icon;
                   const active = activeTab === item.id;
@@ -1138,14 +1427,21 @@ export const AdminPage = () => {
                       key={item.id}
                       type="button"
                       onClick={() => setActiveTab(item.id)}
-                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
+                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
                         active
                           ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
                           : 'text-slate-400 hover:text-white hover:bg-slate-900'
                       }`}
                     >
-                      <Icon className={`h-4 w-4 ${active ? 'text-white' : 'text-slate-400'}`} />
-                      <span>{item.label}</span>
+                      <div className="flex items-center gap-3">
+                        <Icon className={`h-4 w-4 ${active ? 'text-white' : 'text-slate-400'}`} />
+                        <span>{item.label}</span>
+                      </div>
+                      {item.badge && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black tracking-wide bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          {item.badge}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -1158,6 +1454,7 @@ export const AdminPage = () => {
               </p>
               <div className="space-y-1">
                 {[
+                  { id: 'b2b', label: `B2B & API Resellers (${b2bPartners.length})`, icon: Globe, badge: 'Wholesale' },
                   { id: 'api_keys', label: 'API Status & Keys', icon: Key, badge: 'Protected' },
                   { id: 'system', label: 'System & Optimization', icon: Activity },
                   { id: 'settings', label: 'Pricing & Settings', icon: Sliders },
@@ -1512,14 +1809,24 @@ export const AdminPage = () => {
                           </Badge>
                         </td>
                         <td className="py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedInvoice(b)}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 text-indigo-600 transition-colors"
-                            title="View Receipt"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTicketBooking(b)}
+                              className="p-1.5 rounded-lg hover:bg-slate-100 text-indigo-600 transition-colors"
+                              title="View Customer E-Ticket Voucher"
+                            >
+                              <Ticket className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedInvoice(b)}
+                              className="p-1.5 rounded-lg hover:bg-slate-100 text-indigo-600 transition-colors"
+                              title="View Receipt"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1664,6 +1971,14 @@ export const AdminPage = () => {
                             <div className="flex items-center justify-end gap-1.5">
                               <button
                                 type="button"
+                                onClick={() => setSelectedTicketBooking(b)}
+                                className="p-1.5 rounded-lg hover:bg-slate-100 text-indigo-600 transition-colors"
+                                title="View Customer E-Ticket Voucher"
+                              >
+                                <Ticket className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
                                 onClick={() => setSelectedInvoice(b)}
                                 className="p-1.5 rounded-lg hover:bg-slate-100 text-indigo-600 transition-colors"
                                 title="View Invoice"
@@ -1702,6 +2017,201 @@ export const AdminPage = () => {
               </div>
             )}
           </div>
+          )}
+
+          {/* TAB: MANUAL WALLET DEPOSITS & CONCIERGE APPROVALS */}
+          {activeTab === 'wallet_deposits' && (
+            <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-sm space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-9 w-9 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
+                      <Wallet className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-black text-slate-900 tracking-tight">
+                        Manual Wallet Deposits &amp; Concierge Verification
+                      </h2>
+                      <p className="text-xs text-slate-500">
+                        Review customer offline payment receipts (bKash, Nagad, Bank Wire), verify transaction IDs, and approve to credit wallet balances instantly.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      api.get('/wallet/admin/manual-deposits').then((res) => {
+                        if (res.data?.data) setManualDeposits(res.data.data);
+                        showToast('Wallet deposits refreshed.');
+                      });
+                    }}
+                    className="text-xs font-bold gap-1.5"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>Sync</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportToCSV('manual-wallet-deposits.csv', manualDeposits)}
+                    className="text-xs font-bold gap-1"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>CSV</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Metric summary chips */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase block">Total Deposit Requests</span>
+                  <span className="text-xl font-black text-slate-900 mt-0.5 block">{manualDeposits.length}</span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200/80">
+                  <span className="text-[11px] font-bold text-amber-700 uppercase block">Pending Verification</span>
+                  <span className="text-xl font-black text-amber-900 mt-0.5 block">
+                    {manualDeposits.filter((d) => d.status === 'PENDING').length}
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200/80">
+                  <span className="text-[11px] font-bold text-emerald-700 uppercase block">Approved &amp; Credited</span>
+                  <span className="text-xl font-black text-emerald-900 mt-0.5 block">
+                    {manualDeposits.filter((d) => d.status === 'APPROVED').length}
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-brand-50 border border-brand-200/80">
+                  <span className="text-[11px] font-bold text-brand-700 uppercase block">Credited Volume</span>
+                  <span className="text-xl font-black text-brand-900 mt-0.5 block">
+                    ${manualDeposits.filter((d) => d.status === 'APPROVED').reduce((sum, d) => sum + Number(d.amount || 0), 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Status filter tabs */}
+              <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+                {['ALL', 'PENDING', 'APPROVED', 'REJECTED'].map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setDepositStatusFilter(st)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      depositStatusFilter === st
+                        ? 'bg-brand-600 text-white shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {st === 'ALL' ? `All (${manualDeposits.length})` : `${st} (${manualDeposits.filter((d) => d.status === st).length})`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Deposits Table */}
+              {manualDeposits.filter((d) => depositStatusFilter === 'ALL' || d.status === depositStatusFilter).length === 0 ? (
+                <div className="p-12 text-center text-slate-400 text-xs bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                  No {depositStatusFilter.toLowerCase()} wallet deposits found.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500 uppercase tracking-wider font-extrabold text-[10px]">
+                        <th className="py-3 px-3">Customer</th>
+                        <th className="py-3 px-3">Amount</th>
+                        <th className="py-3 px-3">Method</th>
+                        <th className="py-3 px-3">Transaction ID / Ref</th>
+                        <th className="py-3 px-3">Sender Account</th>
+                        <th className="py-3 px-3">Notes</th>
+                        <th className="py-3 px-3 text-center">Status</th>
+                        <th className="py-3 px-3">Submitted At</th>
+                        <th className="py-3 px-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {manualDeposits
+                        .filter((d) => depositStatusFilter === 'ALL' || d.status === depositStatusFilter)
+                        .map((deposit) => {
+                          const depId = deposit.id || deposit._id;
+                          const isProcessing = processingDepositId === depId;
+                          return (
+                            <tr key={depId} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="py-3.5 px-3">
+                                <span className="font-bold text-slate-900 block">{deposit.userName || 'Customer'}</span>
+                                <span className="text-[11px] text-slate-400 block">{deposit.userEmail}</span>
+                              </td>
+                              <td className="py-3.5 px-3 font-mono font-black text-slate-900">
+                                ${Number(deposit.amount).toFixed(2)}
+                              </td>
+                              <td className="py-3.5 px-3 font-semibold text-slate-700">
+                                {deposit.paymentMethod}
+                              </td>
+                              <td className="py-3.5 px-3 font-mono text-[11px] text-brand-700 font-bold">
+                                {deposit.transactionId}
+                              </td>
+                              <td className="py-3.5 px-3 text-slate-600 font-medium">
+                                {deposit.senderAccount}
+                              </td>
+                              <td className="py-3.5 px-3 text-slate-500 max-w-[160px] truncate" title={deposit.notes}>
+                                {deposit.notes || '—'}
+                              </td>
+                              <td className="py-3.5 px-3 text-center">
+                                <span
+                                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                    deposit.status === 'APPROVED'
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      : deposit.status === 'REJECTED'
+                                        ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                        : 'bg-amber-100 text-amber-800 border border-amber-200'
+                                  }`}
+                                >
+                                  {deposit.status}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-3 text-slate-400 text-[11px]">
+                                {new Date(deposit.createdAt).toLocaleDateString()} {new Date(deposit.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                              <td className="py-3.5 px-3 text-right">
+                                {deposit.status === 'PENDING' ? (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      disabled={isProcessing}
+                                      onClick={() => handleApproveDeposit(depId)}
+                                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition-colors flex items-center gap-1 shadow-xs disabled:opacity-50"
+                                      title="Verify and credit amount to customer wallet"
+                                    >
+                                      <CheckCircle2 className="h-3 w-3" />
+                                      <span>Approve</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isProcessing}
+                                      onClick={() => handleRejectDeposit(depId)}
+                                      className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-[11px] transition-colors flex items-center gap-1 disabled:opacity-50"
+                                      title="Reject deposit request"
+                                    >
+                                      <XCircle className="h-3 w-3" />
+                                      <span>Reject</span>
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400 font-medium">
+                                    {deposit.approvedBy ? `Verified: ${deposit.approvedBy}` : deposit.status}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           )}
 
           {/* TAB 3: HOTELS FACILITY */}
@@ -2017,6 +2527,685 @@ export const AdminPage = () => {
           </div>
           )}
 
+          {/* TAB: OFFERS & PROMOTIONAL CAMPAIGNS */}
+          {activeTab === 'offers' && (
+          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-black text-slate-900">Offers, Promos &amp; Bank Partnerships</h2>
+                <p className="text-xs text-slate-500">
+                  Manage homepage promotional cards, bank cardholder privileges, and discount campaigns.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative">
+                  <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    value={offerSearch}
+                    onChange={(e) => setOfferSearch(e.target.value)}
+                    placeholder="Search by title, promo code, or tag..."
+                    className="w-full sm:w-64 pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'special_offer', label: 'Special Promos' },
+                    { id: 'bank_partner', label: 'Bank Partners' },
+                  ].map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setOfferCategoryFilter(cat.id)}
+                      className={`px-3 py-1.5 rounded-lg transition-all ${
+                        offerCategoryFilter === cat.id
+                          ? 'bg-white text-indigo-600 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={handleOpenCreateOfferModal}
+                  className="rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20 flex items-center gap-1.5"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add New Offer</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Filtered offers grid */}
+            {filteredOffers.length === 0 ? (
+              <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-2xl space-y-3">
+                <Tag className="h-10 w-10 text-slate-300 mx-auto" />
+                <p className="text-sm font-bold text-slate-700">No offers found</p>
+                <p className="text-xs text-slate-400">Try adjusting your search criteria or create a new promotional offer.</p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleOpenCreateOfferModal}
+                  className="rounded-xl font-bold text-xs"
+                >
+                  Create First Offer
+                </Button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredOffers.map((offer) => {
+                  const isBank = offer.category === 'bank_partner';
+                  return (
+                    <div
+                      key={offer._id || offer.id}
+                      className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
+                    >
+                      {/* Card Preview Banner */}
+                      <div className={`p-5 bg-gradient-to-br ${offer.gradient || 'from-indigo-600 to-sky-700'} text-white relative`}>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm text-[10px] font-bold uppercase tracking-wider">
+                            {offer.tag || (isBank ? 'Bank Partner' : 'Special Promo')}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
+                              offer.active !== false ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-300'
+                            }`}
+                          >
+                            {offer.active !== false ? 'Active' : 'Draft / Inactive'}
+                          </span>
+                        </div>
+                        <h3 className="font-black text-base leading-snug line-clamp-2">{offer.title}</h3>
+                        {offer.discount && (
+                          <p className="text-xs font-bold text-amber-200 mt-1">{offer.discount}</p>
+                        )}
+                      </div>
+
+                      {/* Card Content & Metadata */}
+                      <div className="p-4 space-y-3 flex-1 flex flex-col justify-between text-xs">
+                        <div className="space-y-2">
+                          <p className="text-slate-600 line-clamp-2 text-[11px]">{offer.subtitle}</p>
+
+                          <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl text-[10px]">
+                            <div>
+                              <span className="text-slate-400 block font-medium">Category</span>
+                              <strong className="text-slate-800 capitalize">
+                                {isBank ? 'Bank Privilege' : 'Special Promo'}
+                              </strong>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block font-medium">Promo Code</span>
+                              <strong className="font-mono text-indigo-600">
+                                {offer.promoCode || 'None (Auto)'}
+                              </strong>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block font-medium">Validity</span>
+                              <span className="text-slate-700 font-medium truncate block">
+                                {offer.validUntil || 'Ongoing'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block font-medium">Button Action</span>
+                              <span className="text-slate-700 font-medium truncate block">
+                                {offer.buttonText || 'Book Now'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {offer.link && (
+                            <p className="text-[10px] text-slate-400 font-mono truncate" title={offer.link}>
+                              Target: <span className="text-slate-600">{offer.link}</span>
+                            </p>
+                          )}
+
+                          {Array.isArray(offer.features) && offer.features.length > 0 && (
+                            <ul className="text-[10px] text-slate-500 space-y-0.5 list-disc pl-3 pt-1">
+                              {offer.features.slice(0, 3).map((feat, idx) => (
+                                <li key={idx} className="line-clamp-1">{feat}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleOfferActive(offer)}
+                            className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-colors ${
+                              offer.active !== false
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            {offer.active !== false ? 'Live on Site' : 'Paused / Hidden'}
+                          </button>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditOfferModal(offer)}
+                              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-700 hover:text-indigo-600 transition-colors"
+                              title="Edit Offer Details"
+                            >
+                              <Edit3 className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => promptDelete('offer', offer._id || offer.id, offer.title, `${isBank ? 'Bank Partner' : 'Special Offer'} - ${offer.discount || offer.tag || ''}`)}
+                              className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-600 transition-colors"
+                              title="Delete Offer (Requires Reason)"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          )}
+
+          {/* TAB: B2B API RESELLERS & WHOLESALE ENGINE */}
+          {activeTab === 'b2b' && (
+          <div className="space-y-6">
+            {/* Header Master Banner */}
+            <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-900 via-brand-950 to-indigo-950 text-white border border-brand-800/40 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="flex items-start gap-4">
+                <div className="h-12 w-12 rounded-2xl bg-brand-500/20 text-brand-300 flex items-center justify-center shrink-0 border border-brand-400/30 shadow-inner">
+                  <Globe className="h-6 w-6" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base font-black text-white">B2B API Resellers &amp; Wholesale Gateway</h2>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      Live Gateway Active
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                    Monetize and distribute this travel platform&apos;s real-time inventory (Flights, Hotels, Packages) via secure programmatic API keys to third-party travel agencies, OTAs, and corporate booking portals.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setB2bModalOpen(true)}
+                  className="rounded-xl font-black text-xs px-4 py-2 bg-brand-500 hover:bg-brand-600 shadow-md gap-1.5"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Issue New Partner Key</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Top Metric Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-xs font-bold uppercase tracking-wider">Active Resellers</span>
+                  <div className="h-8 w-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                    <Users className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-slate-900">
+                    {b2bPartners.filter((p) => p.status === 'ACTIVE').length}
+                  </span>
+                  <span className="text-xs font-semibold text-slate-400">
+                    / {b2bPartners.length} Total
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  Connected OTA &amp; Corporate Clients
+                </p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-xs font-bold uppercase tracking-wider">API Requests</span>
+                  <div className="h-8 w-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                    <Activity className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-slate-900">
+                    {b2bPartners.reduce((acc, p) => acc + (p.totalRequests || 0), 0).toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-[11px] text-sky-600 font-semibold flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
+                  Programmatic searches served
+                </p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-xs font-bold uppercase tracking-wider">B2B Wholesale GMV</span>
+                  <div className="h-8 w-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                    <TrendingUp className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-emerald-600">
+                    {formatCurrency(b2bPartners.reduce((acc, p) => acc + (p.totalRevenue || 0), 0), currency, exchangeRates)}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 font-semibold">
+                  Net invoiced reseller volume
+                </p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-xs font-bold uppercase tracking-wider">Default Margin</span>
+                  <div className="h-8 w-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                    <Sliders className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-amber-600">
+                    {b2bSettings.defaultDiscount || 8.5}%
+                  </span>
+                  <span className="text-xs font-semibold text-slate-400">Off Retail</span>
+                </div>
+                <p className="text-[11px] text-slate-500 font-semibold">
+                  Standard wholesale commission cut
+                </p>
+              </div>
+            </div>
+
+            {/* Wholesale Configuration & Pricing Tiers */}
+            <div className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-xs space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                    Wholesale Gateway Configuration
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Control global wholesale margin discounts and reseller access gates.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateB2BSettings({ enabled: !b2bSettings.enabled })}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+                      b2bSettings.enabled
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : 'bg-rose-50 border-rose-200 text-rose-700'
+                    }`}
+                  >
+                    API Gateway: {b2bSettings.enabled ? 'Online' : 'Disabled'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Pricing Tiers Offered */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-2xl border border-emerald-200 bg-emerald-50/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase text-emerald-800 tracking-wider">
+                      Free Trial
+                    </span>
+                    <Badge variant="success" size="sm">0.0% Net Cut</Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Designed for evaluation, sandbox testing, and initial partner developer integrations.
+                  </p>
+                  <ul className="text-[11px] space-y-1.5 text-slate-600 font-medium">
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>500 requests/hour evaluation limit</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>Sandbox &amp; Read-Only Catalog API</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>Community Developer Support</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase text-slate-700 tracking-wider">
+                      Starter Tier
+                    </span>
+                    <Badge variant="outline" size="sm">5.0% Net Cut</Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Designed for boutique travel agents and local operators needing programmatic flight and hotel inventory.
+                  </p>
+                  <ul className="text-[11px] space-y-1.5 text-slate-600 font-medium">
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      <span>2,000 requests/hour rate limit</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      <span>Standard Flight &amp; Hotel REST APIs</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      <span>Direct email support</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="p-4 rounded-2xl border-2 border-brand-500 bg-brand-50/30 space-y-3 relative shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase text-brand-700 tracking-wider">
+                      Growth Tier (Popular)
+                    </span>
+                    <Badge variant="primary" size="sm">8.5% Net Cut</Badge>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Ideal for regional OTAs, travel aggregators, and fintech lifestyle app integrations.
+                  </p>
+                  <ul className="text-[11px] space-y-1.5 text-slate-700 font-medium">
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-brand-600" />
+                      <span>10,000 requests/hour rate limit</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-brand-600" />
+                      <span>Real-time Webhook booking callbacks</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-brand-600" />
+                      <span>Priority API routing &amp; telemetry</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-indigo-200 bg-indigo-50/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase text-indigo-900 tracking-wider">
+                      Enterprise Reseller
+                    </span>
+                    <Badge variant="accent" size="sm">12.0% Net Cut</Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    For high-volume multinational aggregators, corporate TMCs, and white-label platforms.
+                  </p>
+                  <ul className="text-[11px] space-y-1.5 text-slate-600 font-medium">
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>50,000+ requests/hour &amp; burst quota</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>Dedicated 99.99% uptime SLA</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>Custom wholesale flight markup</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            {/* Registered B2B Partners Table */}
+            <div className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                    Registered B2B Partner Clients ({b2bPartners.length})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Provisioned API keys, assigned commission margins, and rate limits.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Search company or email..."
+                      value={b2bSearch}
+                      onChange={(e) => setB2bSearch(e.target.value)}
+                      className="pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 w-56"
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportToCSV('b2b-partners-directory.csv', b2bPartners)}
+                    className="text-xs font-bold gap-1"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>CSV</span>
+                  </Button>
+                </div>
+              </div>
+
+              {b2bPartners.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-xs">
+                  No B2B partners registered yet. Click &quot;Issue New Partner Key&quot; to provision an API integration.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500 uppercase tracking-wider font-extrabold text-[10px]">
+                        <th className="py-3 px-3">Partner Company</th>
+                        <th className="py-3 px-3">Tier</th>
+                        <th className="py-3 px-3">Provisioned API Key</th>
+                        <th className="py-3 px-3 text-center">Margin %</th>
+                        <th className="py-3 px-3 text-center">Requests</th>
+                        <th className="py-3 px-3 text-right">Wholesale GMV</th>
+                        <th className="py-3 px-3 text-center">Status</th>
+                        <th className="py-3 px-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {b2bPartners
+                        .filter((p) => {
+                          if (!b2bSearch) return true;
+                          const q = b2bSearch.toLowerCase();
+                          return (p.name || '').toLowerCase().includes(q) || (p.contactEmail || '').toLowerCase().includes(q);
+                        })
+                        .map((partner) => {
+                          const partnerId = partner._id || partner.id;
+                          const isRevealed = revealedKeys[partnerId];
+                          const isCopied = copiedKeyId === partnerId;
+
+                          return (
+                            <tr key={partnerId} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="py-3.5 px-3">
+                                <span className="font-bold text-slate-900 block">{partner.name}</span>
+                                <span className="text-[11px] text-slate-400 block">{partner.contactEmail}</span>
+                              </td>
+                              <td className="py-3.5 px-3">
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
+                                  partner.tier === 'ENTERPRISE'
+                                    ? 'bg-purple-100 text-purple-700'
+                                    : partner.tier === 'GROWTH'
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : partner.tier === 'FREE_TRIAL'
+                                        ? 'bg-emerald-100 text-emerald-700'
+                                        : 'bg-slate-100 text-slate-700'
+                                }`}
+                                >
+                                  {partner.tier === 'FREE_TRIAL' ? 'FREE TRIAL' : partner.tier}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-3 font-mono text-[11px]">
+                                <div className="flex items-center gap-1.5 bg-slate-100 py-1 px-2 rounded-lg border border-slate-200 w-fit">
+                                  <span>
+                                    {isRevealed
+                                      ? partner.apiKey
+                                      : `${partner.apiKey.slice(0, 14)}••••••••`}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setRevealedKeys((prev) => ({ ...prev, [partnerId]: !isRevealed }))}
+                                    className="text-slate-400 hover:text-slate-700 p-0.5"
+                                    title={isRevealed ? 'Hide API Key' : 'Reveal API Key'}
+                                  >
+                                    {isRevealed ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(partner.apiKey);
+                                      setCopiedKeyId(partnerId);
+                                      showToast('API Key copied to clipboard!');
+                                      setTimeout(() => setCopiedKeyId(null), 2000);
+                                    }}
+                                    className="text-slate-400 hover:text-indigo-600 p-0.5"
+                                    title="Copy API Key"
+                                  >
+                                    {isCopied ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-3 text-center">
+                                <span className="font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                                  {partner.commissionDiscount}%
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-3 text-center font-bold text-slate-700">
+                                {(partner.totalRequests || 0).toLocaleString()}
+                              </td>
+                              <td className="py-3.5 px-3 text-right font-black text-slate-900">
+                                {formatCurrency(partner.totalRevenue || 0, currency, exchangeRates)}
+                              </td>
+                              <td className="py-3.5 px-3 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleB2BStatus(partner)}
+                                  className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider transition-colors border ${
+                                    partner.status === 'ACTIVE'
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                      : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                                  }`}
+                                >
+                                  {partner.status}
+                                </button>
+                              </td>
+                              <td className="py-3.5 px-3 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRegenerateB2BKey(partner)}
+                                    className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-indigo-600 transition-colors"
+                                    title="Regenerate API Key"
+                                  >
+                                    <RefreshCw className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteB2BPartner(partner)}
+                                    className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors"
+                                    title="Revoke / Delete Partner"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Developer Documentation & Integration Sandbox */}
+            <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 shadow-xl text-white space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Code className="h-5 w-5 text-brand-400" />
+                    <h3 className="text-sm font-black uppercase tracking-wider text-white">
+                      Integration SDK &amp; Programmatic Endpoints
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Sample integration code for client platforms connecting via API key.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700">
+                  {['curl', 'node', 'python'].map((lang) => (
+                    <button
+                      key={lang}
+                      type="button"
+                      onClick={() => setB2bCodeTab(lang)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all uppercase ${
+                        b2bCodeTab === lang
+                          ? 'bg-brand-500 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {lang === 'node' ? 'Node.js' : lang}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Code Snippet Box */}
+              <div className="relative">
+                <pre className="p-4 rounded-2xl bg-black/60 border border-slate-800 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed">
+                  {getB2BSnippet(b2bCodeTab)}
+                </pre>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(getB2BSnippet(b2bCodeTab));
+                    showToast('Code snippet copied to clipboard!');
+                  }}
+                  className="absolute right-3 top-3 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-300 border border-slate-700 transition-colors flex items-center gap-1"
+                >
+                  <Copy className="h-3 w-3" />
+                  <span>Copy</span>
+                </button>
+              </div>
+
+              {/* Endpoints Quick Reference Table */}
+              <div className="pt-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
+                  Standard Public B2B Wholesale Endpoints
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs font-mono">
+                  <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] text-emerald-400 font-bold block">GET</span>
+                    <span className="text-slate-200">/api/v1/b2b/flights/search</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] text-emerald-400 font-bold block">GET</span>
+                    <span className="text-slate-200">/api/v1/b2b/hotels/search</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] text-brand-400 font-bold block">POST</span>
+                    <span className="text-slate-200">/api/v1/b2b/bookings/create</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          )}
+
           {/* TAB: API INTEGRATIONS & SECURITY KEY VAULT */}
           {activeTab === 'api_keys' && (
           <div className="space-y-6">
@@ -2080,6 +3269,7 @@ export const AdminPage = () => {
                             {service.id === 'mongodb' && <Database className="h-6 w-6 text-emerald-600" />}
                             {service.id === 'jwt' && <ShieldCheck className="h-6 w-6 text-purple-600" />}
                             {service.id === 'stripe' && <CreditCard className="h-6 w-6 text-indigo-600" />}
+                            {service.id === 'geoapify' && <MapPin className="h-6 w-6 text-emerald-600" />}
                           </div>
                           <div>
                             <h3 className="text-sm font-black text-slate-900">{service.name}</h3>
@@ -2532,7 +3722,7 @@ export const AdminPage = () => {
                       </td>
                       <td className="py-3">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                          u.role === 'admin'
+                          (u.role || '').toUpperCase() === 'ADMIN'
                             ? 'bg-purple-100 text-purple-800'
                             : 'bg-slate-100 text-slate-600'
                         }`}
@@ -2546,7 +3736,7 @@ export const AdminPage = () => {
                           onClick={() => handleToggleUserRole(u)}
                           className="px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 text-[11px] font-bold text-slate-700 transition-colors"
                         >
-                          {u.role === 'admin' ? 'Demote to User' : 'Promote to Admin'}
+                          {(u.role || '').toUpperCase() === 'ADMIN' ? 'Demote to Customer' : 'Promote to Admin'}
                         </button>
                       </td>
                     </tr>
@@ -2870,6 +4060,355 @@ export const AdminPage = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* MODAL: CUSTOMER E-TICKET VOUCHER (PASSENGER VIEW) */}
+      <ETicketModal
+        booking={selectedTicketBooking}
+        isOpen={Boolean(selectedTicketBooking)}
+        onClose={() => setSelectedTicketBooking(null)}
+      />
+
+      {/* MODAL: ADD / EDIT OFFER */}
+      <Modal
+        isOpen={offerModalOpen}
+        onClose={() => setOfferModalOpen(false)}
+        title={editingOffer ? 'Edit Promotional Offer' : 'Add New Promotional Offer'}
+      >
+        <form onSubmit={handleSaveOffer} className="space-y-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="offerTitleInput" className="font-bold text-slate-800 block text-xs">
+                Offer Title <span className="text-rose-500">*</span>
+              </label>
+              <input
+                id="offerTitleInput"
+                type="text"
+                value={offerFormData.title}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, title: e.target.value }))}
+                placeholder="e.g. Flat 15% OFF on International Flights"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                required
+              />
+            </div>
+
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="offerSubtitleInput" className="font-bold text-slate-800 block text-xs">
+                Subtitle / Description <span className="text-rose-500">*</span>
+              </label>
+              <input
+                id="offerSubtitleInput"
+                type="text"
+                value={offerFormData.subtitle}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, subtitle: e.target.value }))}
+                placeholder="e.g. Book Dubai, Singapore, Bangkok or London flights and save big."
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerCategorySelect" className="font-bold text-slate-800 block text-xs">
+                Category
+              </label>
+              <select
+                id="offerCategorySelect"
+                value={offerFormData.category}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, category: e.target.value }))}
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 bg-white"
+              >
+                <option value="special_offer">Special Offer / Promo Voucher</option>
+                <option value="bank_partner">Bank Partner Privilege Card</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerTagInput" className="font-bold text-slate-800 block text-xs">
+                Card Badge / Tag
+              </label>
+              <input
+                id="offerTagInput"
+                type="text"
+                value={offerFormData.tag}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, tag: e.target.value }))}
+                placeholder="e.g. Promo: TRAVEL20, Beach Escape, Co-Branded"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerDiscountInput" className="font-bold text-slate-800 block text-xs">
+                Discount Label
+              </label>
+              <input
+                id="offerDiscountInput"
+                type="text"
+                value={offerFormData.discount}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, discount: e.target.value }))}
+                placeholder="e.g. Flat 15% OFF or 2,000 Cashback"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerPromoCodeInput" className="font-bold text-slate-800 block text-xs">
+                Promo Code
+              </label>
+              <input
+                id="offerPromoCodeInput"
+                type="text"
+                value={offerFormData.promoCode}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, promoCode: e.target.value.toUpperCase() }))}
+                placeholder="e.g. TRAVEL20"
+                className="w-full p-2.5 font-mono uppercase rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerButtonTextInput" className="font-bold text-slate-800 block text-xs">
+                Button Text
+              </label>
+              <input
+                id="offerButtonTextInput"
+                type="text"
+                value={offerFormData.buttonText}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, buttonText: e.target.value }))}
+                placeholder="e.g. Book Now, View Resorts, View Details"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerLinkInput" className="font-bold text-slate-800 block text-xs">
+                Target Action Link
+              </label>
+              <input
+                id="offerLinkInput"
+                type="text"
+                value={offerFormData.link}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, link: e.target.value }))}
+                placeholder="e.g. /flights?destination=DXB or /hotels"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="offerGradientSelect" className="font-bold text-slate-800 block text-xs">
+                Card Gradient Theme
+              </label>
+              <select
+                id="offerGradientSelect"
+                value={offerFormData.gradient}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, gradient: e.target.value }))}
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 bg-white"
+              >
+                <option value="from-brand-600 to-sky-700">Flight Ocean Blue (from-brand-600 to-sky-700)</option>
+                <option value="from-amber-500 to-orange-600">Resort Sunset Amber (from-amber-500 to-orange-600)</option>
+                <option value="from-emerald-600 to-teal-700">Maldives Emerald Palm (from-emerald-600 to-teal-700)</option>
+                <option value="from-blue-700 via-indigo-700 to-slate-900">EBL Visa Deep Blue (from-blue-700 to-slate-900)</option>
+                <option value="from-pink-600 via-purple-700 to-indigo-900">bKash Ruby Magenta (from-pink-600 to-indigo-900)</option>
+                <option value="from-slate-800 via-slate-900 to-indigo-950">Amex Executive Charcoal (from-slate-800 to-indigo-950)</option>
+                <option value="from-purple-600 to-indigo-800">Royal Purple VIP (from-purple-600 to-indigo-800)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="offerFeaturesTextarea" className="font-bold text-slate-800 block text-xs">
+                Feature Highlights / Terms (one per line)
+              </label>
+              <textarea
+                id="offerFeaturesTextarea"
+                rows={3}
+                value={offerFormData.features}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, features: e.target.value }))}
+                placeholder="0% Interest EMI up to 12 Months&#10;Complimentary Balaka Executive Lounge&#10;Extra 2x TripCoins per transaction"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="offerValidUntilInput" className="font-bold text-slate-800 block text-xs">
+                Validity Notice
+              </label>
+              <input
+                id="offerValidUntilInput"
+                type="text"
+                value={offerFormData.validUntil}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, validUntil: e.target.value }))}
+                placeholder="e.g. Valid until Dec 2026"
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 pt-6">
+              <input
+                id="offerActiveCheckbox"
+                type="checkbox"
+                checked={offerFormData.active}
+                onChange={(e) => setOfferFormData((prev) => ({ ...prev, active: e.target.checked }))}
+                className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
+              />
+              <label htmlFor="offerActiveCheckbox" className="font-bold text-slate-800 text-xs cursor-pointer">
+                Publish live immediately on Customer Portal
+              </label>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOfferModalOpen(false)}
+              className="rounded-xl font-bold text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              className="rounded-xl font-bold text-xs bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20"
+            >
+              {editingOffer ? 'Save Changes' : 'Create Offer'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL: REGISTER NEW B2B PARTNER */}
+      <Modal
+        isOpen={b2bModalOpen}
+        onClose={() => setB2bModalOpen(false)}
+        title="Issue New B2B Partner API Key"
+      >
+        <form onSubmit={handleCreateB2BPartner} className="space-y-4 text-xs">
+          <div className="space-y-1">
+            <label htmlFor="b2bNameInput" className="font-bold text-slate-800 block text-xs">
+              Partner Company / Platform Name <span className="text-rose-500">*</span>
+            </label>
+            <input
+              id="b2bNameInput"
+              type="text"
+              required
+              value={newB2BPartner.name}
+              onChange={(e) => setNewB2BPartner((prev) => ({ ...prev, name: e.target.value }))}
+              placeholder="e.g. Skyscanner Affiliate Network"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label htmlFor="b2bEmailInput" className="font-bold text-slate-800 block text-xs">
+              Technical / Business Contact Email <span className="text-rose-500">*</span>
+            </label>
+            <input
+              id="b2bEmailInput"
+              type="email"
+              required
+              value={newB2BPartner.contactEmail}
+              onChange={(e) => setNewB2BPartner((prev) => ({ ...prev, contactEmail: e.target.value }))}
+              placeholder="e.g. api-partners@skyscanner.net"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label htmlFor="b2bTierSelect" className="font-bold text-slate-800 block text-xs">
+                Reseller Tier
+              </label>
+              <select
+                id="b2bTierSelect"
+                value={newB2BPartner.tier}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const discountMap = { FREE_TRIAL: 0.0, STARTER: 5.0, GROWTH: 8.5, ENTERPRISE: 12.0 };
+                  const limitMap = { FREE_TRIAL: 500, STARTER: 2000, GROWTH: 10000, ENTERPRISE: 50000 };
+                  setNewB2BPartner((prev) => ({
+                    ...prev,
+                    tier: val,
+                    commissionDiscount: discountMap[val] ?? 8.5,
+                    rateLimit: limitMap[val] ?? 10000,
+                  }));
+                }}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold bg-white"
+              >
+                <option value="FREE_TRIAL">Free Trial (0% Discount, 500 req/hr)</option>
+                <option value="STARTER">Starter (5% Discount, 2k req/hr)</option>
+                <option value="GROWTH">Growth (8.5% Discount, 10k req/hr)</option>
+                <option value="ENTERPRISE">Enterprise (12% Discount, 50k req/hr)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="b2bDiscountInput" className="font-bold text-slate-800 block text-xs">
+                Wholesale Margin Discount (%)
+              </label>
+              <input
+                id="b2bDiscountInput"
+                type="number"
+                step="0.5"
+                min="0"
+                max="50"
+                value={newB2BPartner.commissionDiscount}
+                onChange={(e) => setNewB2BPartner((prev) => ({ ...prev, commissionDiscount: Number(e.target.value) }))}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label htmlFor="b2bRateLimitInput" className="font-bold text-slate-800 block text-xs">
+                Rate Limit (requests / hour)
+              </label>
+              <input
+                id="b2bRateLimitInput"
+                type="number"
+                step="1"
+                min="1"
+                placeholder="e.g. 9600"
+                value={newB2BPartner.rateLimit}
+                onChange={(e) => setNewB2BPartner((prev) => ({ ...prev, rateLimit: Number(e.target.value) }))}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="b2bWebhookInput" className="font-bold text-slate-800 block text-xs">
+                Webhook URL (Optional)
+              </label>
+              <input
+                id="b2bWebhookInput"
+                type="url"
+                value={newB2BPartner.webhookUrl}
+                onChange={(e) => setNewB2BPartner((prev) => ({ ...prev, webhookUrl: e.target.value }))}
+                placeholder="https://client-ota.com/webhooks/travel"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold"
+              />
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setB2bModalOpen(false)}
+              className="rounded-xl font-bold text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              loading={b2bModalSubmitting}
+              className="rounded-xl font-bold text-xs px-5 bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20"
+            >
+              Provision Partner &amp; Generate Key
+            </Button>
+          </div>
+        </form>
       </Modal>
 
       {/* MODAL: ADD HOTEL */}

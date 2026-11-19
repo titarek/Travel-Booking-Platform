@@ -17,6 +17,20 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [currency, setCurrency] = useState('USD');
   const [exchangeRates, setExchangeRates] = useState({ USD: 1.0, BDT: 121.5, EUR: 0.92 });
+  const [walletBalance, setWalletBalance] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('travel_user');
+      if (savedUser) {
+        const parsed = JSON.parse(savedUser);
+        return parsed.walletBalance != null ? Number(parsed.walletBalance) : 1000;
+      }
+      return 1000;
+    } catch {
+      return 1000;
+    }
+  });
+  const [walletTransactions, setWalletTransactions] = useState([]);
+  const [isTopUpModalOpen, setIsTopUpModalOpen] = useState(false);
   const [authModalState, setAuthModalState] = useState({
     isOpen: false,
     tab: 'login',
@@ -38,6 +52,93 @@ export const AuthProvider = ({ children }) => {
     fetchRates();
   }, []);
 
+  const fetchWallet = useCallback(async () => {
+    try {
+      const res = await api.get('/wallet');
+      if (res.data?.data) {
+        setWalletBalance(res.data.data.balance);
+        setWalletTransactions(res.data.data.transactions || []);
+        setUser((prev) => {
+          if (!prev) return prev;
+          const updated = { ...prev, walletBalance: res.data.data.balance };
+          localStorage.setItem('travel_user', JSON.stringify(updated));
+          return updated;
+        });
+        return res.data.data;
+      }
+    } catch {
+      // fallback
+    }
+    return null;
+  }, []);
+
+  const topUpWallet = useCallback(async (amount, paymentMethod = 'Credit/Debit Card') => {
+    const res = await api.post('/wallet/topup', {
+      amount: Number(amount),
+      paymentMethod,
+    });
+    if (res.data?.data) {
+      setWalletBalance(res.data.data.balance);
+      setUser((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev, walletBalance: res.data.data.balance };
+        localStorage.setItem('travel_user', JSON.stringify(updated));
+        return updated;
+      });
+      fetchWallet();
+      return res.data;
+    }
+    throw new Error(res.data?.message || 'Top-up failed');
+  }, [fetchWallet]);
+
+  const submitManualDeposit = useCallback(async (depositData) => {
+    const res = await api.post('/wallet/manual-deposit', depositData);
+    if (res.data?.success) {
+      return res.data;
+    }
+    throw new Error(res.data?.message || 'Failed to submit deposit verification');
+  }, []);
+
+  const updateWalletBalance = useCallback((newBalance) => {
+    const num = Number(newBalance);
+    setWalletBalance(num);
+    setUser((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, walletBalance: num };
+      localStorage.setItem('travel_user', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
+  const updateProfile = useCallback(async (data) => {
+    const res = await api.patch('/auth/profile', data);
+    if (res.data?.user) {
+      setUser(res.data.user);
+      localStorage.setItem('travel_user', JSON.stringify(res.data.user));
+      return res.data;
+    }
+    throw new Error(res.data?.message || 'Failed to update profile');
+  }, []);
+
+  const changeEmail = useCallback(async (newEmail, currentPassword) => {
+    const res = await api.patch('/auth/change-email', { newEmail, currentPassword });
+    if (res.data?.email) {
+      setUser((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev, email: res.data.email };
+        localStorage.setItem('travel_user', JSON.stringify(updated));
+        return updated;
+      });
+      return res.data;
+    }
+    throw new Error(res.data?.message || 'Failed to update email');
+  }, []);
+
+  const changePassword = useCallback(async (currentPassword, newPassword) => {
+    const res = await api.patch('/auth/change-password', { currentPassword, newPassword });
+    return res.data;
+  }, []);
+
   // Validate existing token on load via /auth/me
   useEffect(() => {
     const initAuth = async () => {
@@ -47,7 +148,11 @@ export const AuthProvider = ({ children }) => {
           const res = await api.get('/auth/me');
           if (res.data?.user) {
             setUser(res.data.user);
+            if (res.data.user.walletBalance != null) {
+              setWalletBalance(Number(res.data.user.walletBalance));
+            }
             localStorage.setItem('travel_user', JSON.stringify(res.data.user));
+            fetchWallet();
           }
         } catch (err) {
           localStorage.removeItem('travel_token');
@@ -60,7 +165,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     initAuth();
-  }, []);
+  }, [fetchWallet]);
 
   const login = useCallback(async (email, password) => {
     const res = await api.post('/auth/login', { email, password });
@@ -69,11 +174,15 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('travel_user', JSON.stringify(res.data.user));
       setToken(res.data.token);
       setUser(res.data.user);
+      if (res.data.user.walletBalance != null) {
+        setWalletBalance(Number(res.data.user.walletBalance));
+      }
       setAuthModalState({ isOpen: false, tab: 'login' });
+      fetchWallet();
       return res.data;
     }
     throw new Error(res.data?.message || 'Login failed');
-  }, []);
+  }, [fetchWallet]);
 
   const register = useCallback(async (data) => {
     const res = await api.post('/auth/register', data);
@@ -82,17 +191,23 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('travel_user', JSON.stringify(res.data.user));
       setToken(res.data.token);
       setUser(res.data.user);
+      if (res.data.user.walletBalance != null) {
+        setWalletBalance(Number(res.data.user.walletBalance));
+      }
       setAuthModalState({ isOpen: false, tab: 'login' });
+      fetchWallet();
       return res.data;
     }
     throw new Error(res.data?.message || 'Registration failed');
-  }, []);
+  }, [fetchWallet]);
 
   const logout = useCallback(() => {
     localStorage.removeItem('travel_token');
     localStorage.removeItem('travel_user');
     setToken(null);
     setUser(null);
+    setWalletBalance(1000);
+    setWalletTransactions([]);
   }, []);
 
   const openAuthModal = useCallback((tab = 'login', options = {}) => {
@@ -107,6 +222,14 @@ export const AuthProvider = ({ children }) => {
     setAuthModalState((prev) => ({ ...prev, isOpen: false, adminOnly: false }));
   }, []);
 
+  const openTopUpModal = useCallback(() => {
+    setIsTopUpModalOpen(true);
+  }, []);
+
+  const closeTopUpModal = useCallback(() => {
+    setIsTopUpModalOpen(false);
+  }, []);
+
   const contextValue = useMemo(() => ({
     user,
     token,
@@ -114,6 +237,18 @@ export const AuthProvider = ({ children }) => {
     currency,
     setCurrency,
     exchangeRates,
+    walletBalance,
+    walletTransactions,
+    isTopUpModalOpen,
+    openTopUpModal,
+    closeTopUpModal,
+    fetchWallet,
+    topUpWallet,
+    submitManualDeposit,
+    updateWalletBalance,
+    updateProfile,
+    changeEmail,
+    changePassword,
     authModalState,
     openAuthModal,
     closeAuthModal,
@@ -125,7 +260,20 @@ export const AuthProvider = ({ children }) => {
     token,
     loading,
     currency,
+    setCurrency,
     exchangeRates,
+    walletBalance,
+    walletTransactions,
+    isTopUpModalOpen,
+    openTopUpModal,
+    closeTopUpModal,
+    fetchWallet,
+    topUpWallet,
+    submitManualDeposit,
+    updateWalletBalance,
+    updateProfile,
+    changeEmail,
+    changePassword,
     authModalState,
     openAuthModal,
     closeAuthModal,

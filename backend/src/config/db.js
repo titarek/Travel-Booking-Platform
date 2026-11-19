@@ -163,6 +163,23 @@ export const runMigrations = async () => {
       description TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS manual_deposits (
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL,
+      user_name VARCHAR(150) DEFAULT 'Customer',
+      user_email VARCHAR(150) DEFAULT '',
+      amount NUMERIC(10,2) NOT NULL,
+      payment_method VARCHAR(100) NOT NULL,
+      transaction_id VARCHAR(100) NOT NULL,
+      sender_account VARCHAR(100) NOT NULL,
+      notes TEXT DEFAULT '',
+      status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+      approved_by VARCHAR(150),
+      approved_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `;
 
   await pool.query(ddl);
@@ -179,6 +196,8 @@ export const runMigrations = async () => {
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
     CREATE INDEX IF NOT EXISTS idx_wallet_tx_user_id ON wallet_transactions(user_id);
     CREATE INDEX IF NOT EXISTS idx_wallet_tx_created_at ON wallet_transactions(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_manual_deposits_user_id ON manual_deposits(user_id);
+    CREATE INDEX IF NOT EXISTS idx_manual_deposits_status ON manual_deposits(status);
   `;
 
   try {

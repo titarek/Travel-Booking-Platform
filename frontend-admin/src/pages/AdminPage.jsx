@@ -39,6 +39,7 @@ import {
   Edit3,
   Globe,
   Code,
+  Wallet,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
@@ -156,6 +157,9 @@ export const AdminPage = () => {
     webhookUrl: '',
   });
   const [users, setUsers] = useState([]);
+  const [manualDeposits, setManualDeposits] = useState([]);
+  const [depositStatusFilter, setDepositStatusFilter] = useState('ALL');
+  const [processingDepositId, setProcessingDepositId] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
   const [systemHealth, setSystemHealth] = useState(null);
   const [settings, setSettings] = useState({
@@ -356,6 +360,7 @@ export const AdminPage = () => {
         settingsRes,
         apiKeysRes,
         b2bRes,
+        depositsRes,
       ] = await Promise.allSettled([
         api.get('/admin/hotels'),
         api.get('/admin/flights'),
@@ -367,6 +372,7 @@ export const AdminPage = () => {
         api.get('/admin/settings'),
         api.get('/admin/api-keys'),
         api.get('/b2b/admin/partners'),
+        api.get('/wallet/admin/manual-deposits'),
       ]);
 
       if (hotelsRes.status === 'fulfilled' && hotelsRes.value.data?.data) {
@@ -401,6 +407,9 @@ export const AdminPage = () => {
         if (b2bRes.value.data.data.settings) {
           setB2bSettings(b2bRes.value.data.data.settings);
         }
+      }
+      if (depositsRes.status === 'fulfilled' && depositsRes.value.data?.data) {
+        setManualDeposits(depositsRes.value.data.data || []);
       }
     } catch {
       showToast('Error syncing administrative data.', 'error');
@@ -1167,6 +1176,33 @@ export const AdminPage = () => {
     }
   };
 
+  // Manual Deposit Verification Handlers
+  const handleApproveDeposit = async (id) => {
+    setProcessingDepositId(id);
+    try {
+      const res = await api.patch(`/wallet/admin/manual-deposits/${id}/approve`);
+      showToast(res.data?.message || 'Deposit approved and credited to customer wallet!');
+      setManualDeposits((prev) => prev.map((d) => (((d.id || d._id) === id) ? { ...d, status: 'APPROVED' } : d)));
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to approve deposit.', 'error');
+    } finally {
+      setProcessingDepositId(null);
+    }
+  };
+
+  const handleRejectDeposit = async (id) => {
+    setProcessingDepositId(id);
+    try {
+      const res = await api.patch(`/wallet/admin/manual-deposits/${id}/reject`);
+      showToast(res.data?.message || 'Deposit marked as rejected.');
+      setManualDeposits((prev) => prev.map((d) => (((d.id || d._id) === id) ? { ...d, status: 'REJECTED' } : d)));
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to reject deposit.', 'error');
+    } finally {
+      setProcessingDepositId(null);
+    }
+  };
+
   // Toggle user role
   const handleToggleUserRole = async (targetUser) => {
     const isTargetAdmin = (targetUser.role || '').toUpperCase() === 'ADMIN';
@@ -1371,6 +1407,14 @@ export const AdminPage = () => {
                 {[
                   { id: 'overview', label: 'Overview', icon: TrendingUp },
                   { id: 'bookings', label: `Bookings (${bookings.length})`, icon: CreditCard },
+                  {
+                    id: 'wallet_deposits',
+                    label: `Wallet Deposits (${manualDeposits.length})`,
+                    icon: Wallet,
+                    badge: manualDeposits.filter((d) => d.status === 'PENDING').length > 0
+                      ? `${manualDeposits.filter((d) => d.status === 'PENDING').length} Pending`
+                      : null,
+                  },
                   { id: 'hotels', label: `Hotels (${hotels.length})`, icon: Building2 },
                   { id: 'flights', label: `Flights (${flights.length})`, icon: Plane },
                   { id: 'packages', label: `Packages (${packages.length})`, icon: PackageIcon },
@@ -1383,14 +1427,21 @@ export const AdminPage = () => {
                       key={item.id}
                       type="button"
                       onClick={() => setActiveTab(item.id)}
-                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
+                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
                         active
                           ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
                           : 'text-slate-400 hover:text-white hover:bg-slate-900'
                       }`}
                     >
-                      <Icon className={`h-4 w-4 ${active ? 'text-white' : 'text-slate-400'}`} />
-                      <span>{item.label}</span>
+                      <div className="flex items-center gap-3">
+                        <Icon className={`h-4 w-4 ${active ? 'text-white' : 'text-slate-400'}`} />
+                        <span>{item.label}</span>
+                      </div>
+                      {item.badge && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black tracking-wide bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          {item.badge}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -1966,6 +2017,201 @@ export const AdminPage = () => {
               </div>
             )}
           </div>
+          )}
+
+          {/* TAB: MANUAL WALLET DEPOSITS & CONCIERGE APPROVALS */}
+          {activeTab === 'wallet_deposits' && (
+            <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-sm space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-9 w-9 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
+                      <Wallet className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-black text-slate-900 tracking-tight">
+                        Manual Wallet Deposits &amp; Concierge Verification
+                      </h2>
+                      <p className="text-xs text-slate-500">
+                        Review customer offline payment receipts (bKash, Nagad, Bank Wire), verify transaction IDs, and approve to credit wallet balances instantly.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      api.get('/wallet/admin/manual-deposits').then((res) => {
+                        if (res.data?.data) setManualDeposits(res.data.data);
+                        showToast('Wallet deposits refreshed.');
+                      });
+                    }}
+                    className="text-xs font-bold gap-1.5"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>Sync</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportToCSV('manual-wallet-deposits.csv', manualDeposits)}
+                    className="text-xs font-bold gap-1"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>CSV</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Metric summary chips */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase block">Total Deposit Requests</span>
+                  <span className="text-xl font-black text-slate-900 mt-0.5 block">{manualDeposits.length}</span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200/80">
+                  <span className="text-[11px] font-bold text-amber-700 uppercase block">Pending Verification</span>
+                  <span className="text-xl font-black text-amber-900 mt-0.5 block">
+                    {manualDeposits.filter((d) => d.status === 'PENDING').length}
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200/80">
+                  <span className="text-[11px] font-bold text-emerald-700 uppercase block">Approved &amp; Credited</span>
+                  <span className="text-xl font-black text-emerald-900 mt-0.5 block">
+                    {manualDeposits.filter((d) => d.status === 'APPROVED').length}
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-brand-50 border border-brand-200/80">
+                  <span className="text-[11px] font-bold text-brand-700 uppercase block">Credited Volume</span>
+                  <span className="text-xl font-black text-brand-900 mt-0.5 block">
+                    ${manualDeposits.filter((d) => d.status === 'APPROVED').reduce((sum, d) => sum + Number(d.amount || 0), 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Status filter tabs */}
+              <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+                {['ALL', 'PENDING', 'APPROVED', 'REJECTED'].map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setDepositStatusFilter(st)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      depositStatusFilter === st
+                        ? 'bg-brand-600 text-white shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {st === 'ALL' ? `All (${manualDeposits.length})` : `${st} (${manualDeposits.filter((d) => d.status === st).length})`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Deposits Table */}
+              {manualDeposits.filter((d) => depositStatusFilter === 'ALL' || d.status === depositStatusFilter).length === 0 ? (
+                <div className="p-12 text-center text-slate-400 text-xs bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                  No {depositStatusFilter.toLowerCase()} wallet deposits found.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500 uppercase tracking-wider font-extrabold text-[10px]">
+                        <th className="py-3 px-3">Customer</th>
+                        <th className="py-3 px-3">Amount</th>
+                        <th className="py-3 px-3">Method</th>
+                        <th className="py-3 px-3">Transaction ID / Ref</th>
+                        <th className="py-3 px-3">Sender Account</th>
+                        <th className="py-3 px-3">Notes</th>
+                        <th className="py-3 px-3 text-center">Status</th>
+                        <th className="py-3 px-3">Submitted At</th>
+                        <th className="py-3 px-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {manualDeposits
+                        .filter((d) => depositStatusFilter === 'ALL' || d.status === depositStatusFilter)
+                        .map((deposit) => {
+                          const depId = deposit.id || deposit._id;
+                          const isProcessing = processingDepositId === depId;
+                          return (
+                            <tr key={depId} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="py-3.5 px-3">
+                                <span className="font-bold text-slate-900 block">{deposit.userName || 'Customer'}</span>
+                                <span className="text-[11px] text-slate-400 block">{deposit.userEmail}</span>
+                              </td>
+                              <td className="py-3.5 px-3 font-mono font-black text-slate-900">
+                                ${Number(deposit.amount).toFixed(2)}
+                              </td>
+                              <td className="py-3.5 px-3 font-semibold text-slate-700">
+                                {deposit.paymentMethod}
+                              </td>
+                              <td className="py-3.5 px-3 font-mono text-[11px] text-brand-700 font-bold">
+                                {deposit.transactionId}
+                              </td>
+                              <td className="py-3.5 px-3 text-slate-600 font-medium">
+                                {deposit.senderAccount}
+                              </td>
+                              <td className="py-3.5 px-3 text-slate-500 max-w-[160px] truncate" title={deposit.notes}>
+                                {deposit.notes || '—'}
+                              </td>
+                              <td className="py-3.5 px-3 text-center">
+                                <span
+                                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                    deposit.status === 'APPROVED'
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      : deposit.status === 'REJECTED'
+                                        ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                        : 'bg-amber-100 text-amber-800 border border-amber-200'
+                                  }`}
+                                >
+                                  {deposit.status}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-3 text-slate-400 text-[11px]">
+                                {new Date(deposit.createdAt).toLocaleDateString()} {new Date(deposit.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                              <td className="py-3.5 px-3 text-right">
+                                {deposit.status === 'PENDING' ? (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      disabled={isProcessing}
+                                      onClick={() => handleApproveDeposit(depId)}
+                                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition-colors flex items-center gap-1 shadow-xs disabled:opacity-50"
+                                      title="Verify and credit amount to customer wallet"
+                                    >
+                                      <CheckCircle2 className="h-3 w-3" />
+                                      <span>Approve</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isProcessing}
+                                      onClick={() => handleRejectDeposit(depId)}
+                                      className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-[11px] transition-colors flex items-center gap-1 disabled:opacity-50"
+                                      title="Reject deposit request"
+                                    >
+                                      <XCircle className="h-3 w-3" />
+                                      <span>Reject</span>
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400 font-medium">
+                                    {deposit.approvedBy ? `Verified: ${deposit.approvedBy}` : deposit.status}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           )}
 
           {/* TAB 3: HOTELS FACILITY */}
@@ -2605,22 +2851,37 @@ export const AdminPage = () => {
                   >
                     API Gateway: {b2bSettings.enabled ? 'Online' : 'Disabled'}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateB2BSettings({ sandboxMode: !b2bSettings.sandboxMode })}
-                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
-                      b2bSettings.sandboxMode
-                        ? 'bg-amber-50 border-amber-200 text-amber-700'
-                        : 'bg-slate-50 border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    Sandbox Mode: {b2bSettings.sandboxMode ? 'Active' : 'Off'}
-                  </button>
                 </div>
               </div>
 
               {/* Pricing Tiers Offered */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-2xl border border-emerald-200 bg-emerald-50/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase text-emerald-800 tracking-wider">
+                      Free Trial
+                    </span>
+                    <Badge variant="success" size="sm">0.0% Net Cut</Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Designed for evaluation, sandbox testing, and initial partner developer integrations.
+                  </p>
+                  <ul className="text-[11px] space-y-1.5 text-slate-600 font-medium">
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>500 requests/hour evaluation limit</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>Sandbox &amp; Read-Only Catalog API</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>Community Developer Support</span>
+                    </li>
+                  </ul>
+                </div>
+
                 <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-black uppercase text-slate-700 tracking-wider">
@@ -2779,10 +3040,12 @@ export const AdminPage = () => {
                                     ? 'bg-purple-100 text-purple-700'
                                     : partner.tier === 'GROWTH'
                                       ? 'bg-blue-100 text-blue-700'
-                                      : 'bg-slate-100 text-slate-700'
+                                      : partner.tier === 'FREE_TRIAL'
+                                        ? 'bg-emerald-100 text-emerald-700'
+                                        : 'bg-slate-100 text-slate-700'
                                 }`}
                                 >
-                                  {partner.tier}
+                                  {partner.tier === 'FREE_TRIAL' ? 'FREE TRIAL' : partner.tier}
                                 </span>
                               </td>
                               <td className="py-3.5 px-3 font-mono text-[11px]">
@@ -4058,17 +4321,18 @@ export const AdminPage = () => {
                 value={newB2BPartner.tier}
                 onChange={(e) => {
                   const val = e.target.value;
-                  const discountMap = { STARTER: 5.0, GROWTH: 8.5, ENTERPRISE: 12.0 };
-                  const limitMap = { STARTER: 2000, GROWTH: 10000, ENTERPRISE: 50000 };
+                  const discountMap = { FREE_TRIAL: 0.0, STARTER: 5.0, GROWTH: 8.5, ENTERPRISE: 12.0 };
+                  const limitMap = { FREE_TRIAL: 500, STARTER: 2000, GROWTH: 10000, ENTERPRISE: 50000 };
                   setNewB2BPartner((prev) => ({
                     ...prev,
                     tier: val,
-                    commissionDiscount: discountMap[val] || 8.5,
-                    rateLimit: limitMap[val] || 10000,
+                    commissionDiscount: discountMap[val] ?? 8.5,
+                    rateLimit: limitMap[val] ?? 10000,
                   }));
                 }}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold bg-white"
               >
+                <option value="FREE_TRIAL">Free Trial (0% Discount, 500 req/hr)</option>
                 <option value="STARTER">Starter (5% Discount, 2k req/hr)</option>
                 <option value="GROWTH">Growth (8.5% Discount, 10k req/hr)</option>
                 <option value="ENTERPRISE">Enterprise (12% Discount, 50k req/hr)</option>
@@ -4100,8 +4364,9 @@ export const AdminPage = () => {
               <input
                 id="b2bRateLimitInput"
                 type="number"
-                step="500"
-                min="100"
+                step="1"
+                min="1"
+                placeholder="e.g. 9600"
                 value={newB2BPartner.rateLimit}
                 onChange={(e) => setNewB2BPartner((prev) => ({ ...prev, rateLimit: Number(e.target.value) }))}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 text-xs font-semibold"

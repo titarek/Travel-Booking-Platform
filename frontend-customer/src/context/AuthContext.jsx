@@ -91,6 +91,14 @@ export const AuthProvider = ({ children }) => {
     throw new Error(res.data?.message || 'Top-up failed');
   }, [fetchWallet]);
 
+  const submitManualDeposit = useCallback(async (depositData) => {
+    const res = await api.post('/wallet/manual-deposit', depositData);
+    if (res.data?.success) {
+      return res.data;
+    }
+    throw new Error(res.data?.message || 'Failed to submit deposit verification');
+  }, []);
+
   const updateWalletBalance = useCallback((newBalance) => {
     const num = Number(newBalance);
     setWalletBalance(num);
@@ -236,6 +244,7 @@ export const AuthProvider = ({ children }) => {
     closeTopUpModal,
     fetchWallet,
     topUpWallet,
+    submitManualDeposit,
     updateWalletBalance,
     updateProfile,
     changeEmail,
@@ -260,6 +269,7 @@ export const AuthProvider = ({ children }) => {
     closeTopUpModal,
     fetchWallet,
     topUpWallet,
+    submitManualDeposit,
     updateWalletBalance,
     updateProfile,
     changeEmail,
