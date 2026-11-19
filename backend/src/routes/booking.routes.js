@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   createBooking,
+  requestBookingOtp,
   getMyBookings,
   getBookingById,
   cancelBooking,
@@ -34,7 +35,14 @@ const createBookingSchema = {
     }).strict(),
     totalPrice: z.number().positive('Total price must be positive'),
     paymentMethod: z.string().optional(),
+    otpCode: z.string().min(4, 'OTP verification code is required to complete purchase'),
   }).strict(),
+};
+
+const sendOtpSchema = {
+  body: z.object({
+    phone: z.string().optional(),
+  }),
 };
 
 const bookingIdSchema = {
@@ -43,6 +51,7 @@ const bookingIdSchema = {
   }).strict(),
 };
 
+router.post('/send-otp', validate(sendOtpSchema), requestBookingOtp);
 router.post('/', validate(createBookingSchema), createBooking);
 router.get('/', getMyBookings);
 router.get('/:id', validate(bookingIdSchema), getBookingById);

@@ -886,6 +886,34 @@ export const AdminPage = () => {
           // SSE payload catch
         }
       });
+
+      // Real-time manual wallet deposit events
+      eventSource.addEventListener('deposit_created', (e) => {
+        try {
+          const newDep = JSON.parse(e.data);
+          const depId = newDep?.id || newDep?._id;
+          if (!depId) return;
+          setManualDeposits((prev) => {
+            if (prev.some((d) => (d.id || d._id) === depId)) return prev;
+            return [newDep, ...prev];
+          });
+          playNotificationChime();
+          showToast(`💰 New Wallet Deposit Slip: $${Number(newDep.amount).toFixed(2)} from ${newDep.userName || 'Customer'}`, 'info');
+        } catch {
+          // SSE payload catch
+        }
+      });
+
+      eventSource.addEventListener('deposit_updated', (e) => {
+        try {
+          const updated = JSON.parse(e.data);
+          const depId = updated?.id || updated?._id;
+          if (!depId) return;
+          setManualDeposits((prev) => prev.map((d) => (((d.id || d._id) === depId) ? { ...d, ...updated } : d)));
+        } catch {
+          // SSE payload catch
+        }
+      });
     } catch {
       // EventSource initialization catch
     }
@@ -894,13 +922,17 @@ export const AdminPage = () => {
     const pollInterval = setInterval(async () => {
       if (document.visibilityState === 'visible') {
         try {
-          const res = await api.get('/admin/bookings');
-          if (res.data?.data) {
+          const [bookingsRes, depositsRes] = await Promise.allSettled([
+            api.get('/admin/bookings'),
+            api.get('/wallet/admin/manual-deposits'),
+          ]);
+
+          if (bookingsRes.status === 'fulfilled' && bookingsRes.value.data?.data) {
             setBookings((prev) => {
               const existingIds = new Set(prev.map((b) => b._id));
-              const hasNewOrder = res.data.data.some((b) => !existingIds.has(b._id));
+              const hasNewOrder = bookingsRes.value.data.data.some((b) => !existingIds.has(b._id));
               if (hasNewOrder && prev.length > 0) {
-                const newest = res.data.data[0];
+                const newest = bookingsRes.value.data.data[0];
                 if (newest?._id) {
                   setRecentNewOrderId(newest._id);
                   playNotificationChime();
@@ -910,8 +942,12 @@ export const AdminPage = () => {
                   }, 6000);
                 }
               }
-              return res.data.data;
+              return bookingsRes.value.data.data;
             });
+          }
+
+          if (depositsRes.status === 'fulfilled' && depositsRes.value.data?.data) {
+            setManualDeposits(depositsRes.value.data.data);
           }
         } catch {
           // Silent poller catch

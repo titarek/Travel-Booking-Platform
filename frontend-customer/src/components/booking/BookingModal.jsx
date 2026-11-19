@@ -1,14 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   CheckCircle2,
   AlertCircle,
-  Sparkles,
   Ticket,
   Printer,
   Wallet,
   ArrowRight,
   Plus,
+  ShieldCheck,
+  Smartphone,
+  RotateCcw,
+  Lock,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { formatCurrency } from '../../utils/formatters.js';
@@ -38,7 +41,8 @@ export const BookingModal = ({
     fetchWallet,
   } = useAuth();
 
-  const [step, setStep] = useState(1); // 1: Travelers, 2: Payment, 3: Confirmation
+  // 1: Travelers, 2: Payment Review, 3: OTP Verification, 4: Confirmation
+  const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [eTicketOpen, setETicketOpen] = useState(false);
@@ -65,8 +69,24 @@ export const BookingModal = ({
   const [promoMessage, setPromoMessage] = useState('');
   const paymentMethod = 'Travel Digital Wallet';
 
+  // OTP 2FA Security State (Powered by OTP.dev)
+  const [otpCode, setOtpCode] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [maskedPhone, setMaskedPhone] = useState('');
+  const [devCode, setDevCode] = useState('');
+  const [otpCooldown, setOtpCooldown] = useState(0);
+
   // Confirmation result
   const [confirmedBooking, setConfirmedBooking] = useState(null);
+
+  // OTP Resend cooldown timer
+  useEffect(() => {
+    let timer;
+    if (otpCooldown > 0) {
+      timer = setTimeout(() => setOtpCooldown((prev) => prev - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [otpCooldown]);
 
   if (!item) return null;
 
@@ -87,7 +107,8 @@ export const BookingModal = ({
     }
   };
 
-  const handleCreateBooking = async () => {
+  // Step 2 -> Step 3: Trigger OTP.dev security dispatch
+  const handleProceedToOtp = async () => {
     if (!user) {
       openAuthModal('login');
       return;
@@ -96,6 +117,57 @@ export const BookingModal = ({
     if (walletBalance < finalPrice) {
       setError(`Insufficient wallet balance (${formatCurrency(walletBalance, currency, exchangeRates)} available, ${formatCurrency(finalPrice, currency, exchangeRates)} required). Please top up your wallet.`);
       setTopUpModalOpen(true);
+      return;
+    }
+
+    setOtpLoading(true);
+    setError('');
+
+    try {
+      const phoneToSend = contact.phone || user.phone || '+8801700000000';
+      const res = await api.post('/bookings/send-otp', { phone: phoneToSend });
+      if (res.data?.data) {
+        setMaskedPhone(res.data.data.maskedPhone || phoneToSend);
+        if (res.data.data.devCode) {
+          setDevCode(res.data.data.devCode);
+        }
+        setOtpCooldown(60);
+        setStep(3); // Advance to OTP verification
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not dispatch OTP code. Please try again.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  // Resend OTP code
+  const handleResendOtp = async () => {
+    if (otpCooldown > 0) return;
+    setOtpLoading(true);
+    setError('');
+
+    try {
+      const phoneToSend = contact.phone || user.phone || '+8801700000000';
+      const res = await api.post('/bookings/send-otp', { phone: phoneToSend });
+      if (res.data?.data) {
+        if (res.data.data.devCode) {
+          setDevCode(res.data.data.devCode);
+        }
+        setOtpCooldown(60);
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to resend code.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  // Step 3 -> Step 4: Verify OTP code and execute purchase
+  const handleVerifyAndConfirm = async (e) => {
+    if (e) e.preventDefault();
+    if (!otpCode || otpCode.trim().length < 4) {
+      setError('Please enter the 6-digit OTP code received on your phone.');
       return;
     }
 
@@ -110,6 +182,7 @@ export const BookingModal = ({
         contactInfo: contact,
         totalPrice: finalPrice,
         paymentMethod: paymentMethod || 'Travel Digital Wallet',
+        otpCode: otpCode.trim(),
       };
 
       const res = await api.post('/bookings', payload);
@@ -120,10 +193,10 @@ export const BookingModal = ({
         } else {
           fetchWallet();
         }
-        setStep(3); // Confirmation
+        setStep(4); // Confirmation
       }
     } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Failed to complete booking.');
+      setError(err.response?.data?.message || err.message || 'OTP verification failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -133,11 +206,11 @@ export const BookingModal = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={step === 3 ? 'Booking Confirmed!' : `Complete Your ${type.charAt(0).toUpperCase() + type.slice(1)} Booking`}
+      title={step === 4 ? 'Booking Confirmed!' : `Complete Your ${type.charAt(0).toUpperCase() + type.slice(1)} Booking`}
       maxWidth="max-w-2xl"
     >
       <div className="space-y-6">
-        {/* Step Progress Indicator */}
+        {/* Step Progress Indicator (4 Steps) */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <span className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold ${
@@ -146,10 +219,10 @@ export const BookingModal = ({
             >
               1
             </span>
-            <span className="text-xs font-semibold text-slate-700">Passenger Info</span>
+            <span className="text-xs font-semibold text-slate-700">Passenger</span>
           </div>
 
-          <div className="h-0.5 w-12 bg-slate-200" />
+          <div className="h-0.5 w-8 sm:w-12 bg-slate-200" />
 
           <div className="flex items-center gap-2">
             <span className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold ${
@@ -158,19 +231,31 @@ export const BookingModal = ({
             >
               2
             </span>
-            <span className="text-xs font-semibold text-slate-700">Review & Payment</span>
+            <span className="text-xs font-semibold text-slate-700">Payment</span>
           </div>
 
-          <div className="h-0.5 w-12 bg-slate-200" />
+          <div className="h-0.5 w-8 sm:w-12 bg-slate-200" />
 
           <div className="flex items-center gap-2">
             <span className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold ${
-              step === 3 ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'
+              step >= 3 ? 'bg-brand-500 text-white' : 'bg-slate-200 text-slate-500'
             }`}
             >
               3
             </span>
-            <span className="text-xs font-semibold text-slate-700">Confirmation</span>
+            <span className="text-xs font-semibold text-slate-700">2FA OTP</span>
+          </div>
+
+          <div className="h-0.5 w-8 sm:w-12 bg-slate-200" />
+
+          <div className="flex items-center gap-2">
+            <span className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold ${
+              step === 4 ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'
+            }`}
+            >
+              4
+            </span>
+            <span className="text-xs font-semibold text-slate-700">Confirmed</span>
           </div>
         </div>
 
@@ -181,170 +266,169 @@ export const BookingModal = ({
           </div>
         )}
 
-        {/* Selected Item Summary Card */}
-        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase text-brand-600 bg-brand-50 px-2 py-0.5 rounded">
-                {type}
-              </span>
-              <h4 className="font-extrabold text-sm text-slate-900">
-                {item.title || item.name || `${item.airline} (${item.origin?.code} → ${item.destination?.code})`}
-              </h4>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              {item.selectedRoom?.name || (item.cabinClass && `${item.cabinClass} Class`) || item.destination}
-            </p>
-          </div>
-          <div className="text-right">
-            <span className="text-xl font-black text-brand-600">
-              {formatCurrency(finalPrice, currency, exchangeRates)}
-            </span>
-            <span className="text-[10px] text-slate-400 block">Total Payable</span>
-          </div>
-        </div>
-
-        {/* Live Flight Radar Map for Flight Bookings */}
-        {type === 'flight' && (
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                Live Radar Route & Aircraft Telemetry
-              </span>
-              <span className="text-[10px] text-slate-500 font-mono font-semibold">
-                {item.flightNumber || 'FLIGHT'}
-              </span>
-            </div>
-            <FlightRadarMap
-              flight={item}
-              className="h-44 sm:h-52 w-full rounded-2xl border border-slate-200/90 shadow-inner overflow-hidden"
-            />
-          </div>
-        )}
-
         {/* STEP 1: Traveler Details */}
         {step === 1 && (
           <div className="space-y-4">
-            <h4 className="text-sm font-bold text-slate-900">Primary Traveler Details</h4>
+            {/* Quick Item Summary Header */}
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Selected {type}</span>
+                <h4 className="text-sm font-black text-slate-900">
+                  {item.airline?.name || item.name || item.title || 'Selected Trip'}
+                </h4>
+                <p className="text-xs text-slate-500">
+                  {item.flightNumber ? `Flight ${item.flightNumber} • ${item.origin?.code} → ${item.destination?.code}` : item.location?.city || item.destination}
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="text-base font-black text-brand-600 block">
+                  {formatCurrency(finalPrice, currency, exchangeRates)}
+                </span>
+                <span className="text-[10px] text-slate-400">Total payable</span>
+              </div>
+            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700">Title</label>
+            {/* Live radar preview if flight */}
+            {type === 'flight' && (
+              <FlightRadarMap
+                origin={item.origin}
+                destination={item.destination}
+                airline={item.airline}
+                flightNumber={item.flightNumber}
+                compact
+              />
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Title</label>
                 <select
                   value={traveler.title}
                   onChange={(e) => setTraveler({ ...traveler, title: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 py-2.5 px-3 text-xs font-semibold bg-white"
+                  className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 bg-white"
                 >
-                  <option value="Mr">Mr.</option>
-                  <option value="Mrs">Mrs.</option>
-                  <option value="Ms">Ms.</option>
-                  <option value="Dr">Dr.</option>
+                  <option value="Mr">Mr</option>
+                  <option value="Mrs">Mrs</option>
+                  <option value="Ms">Ms</option>
+                  <option value="Dr">Dr</option>
                 </select>
               </div>
-
-              <div className="sm:col-span-3">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">First Name *</label>
                 <Input
-                  label="First & Given Name"
                   value={traveler.firstName}
                   onChange={(e) => setTraveler({ ...traveler, firstName: e.target.value })}
-                  placeholder="e.g. Tanvir"
+                  placeholder="First name"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Last Name *</label>
+                <Input
+                  value={traveler.lastName}
+                  onChange={(e) => setTraveler({ ...traveler, lastName: e.target.value })}
+                  placeholder="Last name"
                   required
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Input
-                label="Last Name / Surname"
-                value={traveler.lastName}
-                onChange={(e) => setTraveler({ ...traveler, lastName: e.target.value })}
-                placeholder="e.g. Ahmed"
-                required
-              />
-
-              <Input
-                label="Date of Birth"
-                type="date"
-                value={traveler.dateOfBirth}
-                onChange={(e) => setTraveler({ ...traveler, dateOfBirth: e.target.value })}
-                required
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Date of Birth</label>
+                <Input
+                  type="date"
+                  value={traveler.dateOfBirth}
+                  onChange={(e) => setTraveler({ ...traveler, dateOfBirth: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Passport / NID No.</label>
+                <Input
+                  value={traveler.passportNumber}
+                  onChange={(e) => setTraveler({ ...traveler, passportNumber: e.target.value })}
+                  placeholder="e.g. A08291048"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Nationality</label>
+                <Input
+                  value={traveler.nationality}
+                  onChange={(e) => setTraveler({ ...traveler, nationality: e.target.value })}
+                  placeholder="Nationality"
+                />
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Input
-                label="Passport / National ID Number"
-                value={traveler.passportNumber}
-                onChange={(e) => setTraveler({ ...traveler, passportNumber: e.target.value })}
-                placeholder="e.g. A08291048"
-              />
-
-              <Input
-                label="Nationality"
-                value={traveler.nationality}
-                onChange={(e) => setTraveler({ ...traveler, nationality: e.target.value })}
-                placeholder="e.g. Bangladeshi"
-              />
+            {/* Contact details */}
+            <div className="p-3.5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
+                Primary Contact Information (Used for SMS OTP Authorization)
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">Email Address</label>
+                  <Input
+                    type="email"
+                    value={contact.email}
+                    onChange={(e) => setContact({ ...contact, email: e.target.value })}
+                    placeholder="email@example.com"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">Mobile Phone (For 2FA SMS)</label>
+                  <Input
+                    type="tel"
+                    value={contact.phone}
+                    onChange={(e) => setContact({ ...contact, phone: e.target.value })}
+                    placeholder="+880 1711 223344"
+                    required
+                  />
+                </div>
+              </div>
             </div>
 
-            <h4 className="text-sm font-bold text-slate-900 pt-2">Contact & E-ticket Delivery</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Input
-                label="Email Address (for ticket)"
-                type="email"
-                value={contact.email}
-                onChange={(e) => setContact({ ...contact, email: e.target.value })}
-                required
-              />
-
-              <Input
-                label="Mobile Number"
-                type="tel"
-                value={contact.phone}
-                onChange={(e) => setContact({ ...contact, phone: e.target.value })}
-                required
-              />
-            </div>
-
-            <div className="pt-4 flex justify-end gap-2">
-              <Button variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
+            <div className="pt-2 flex justify-end">
               <Button
                 variant="primary"
-                onClick={() => setStep(2)}
-                className="font-bold px-6"
+                onClick={() => {
+                  if (!traveler.firstName || !traveler.lastName || !contact.email) {
+                    setError('Please provide passenger first and last name, and contact details.');
+                    return;
+                  }
+                  setError('');
+                  setStep(2);
+                }}
+                className="font-bold px-8 flex items-center gap-1.5"
               >
-                Proceed to Payment
+                <span>Continue to Payment</span>
+                <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
           </div>
         )}
 
-        {/* STEP 2: Payment Simulation */}
+        {/* STEP 2: Review & Wallet Balance */}
         {step === 2 && (
-          <div className="space-y-5">
-            {/* Promo Code section */}
-            <div className="p-4 bg-brand-50/50 rounded-2xl border border-brand-100 space-y-2">
-              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <Sparkles className="h-4 w-4 text-brand-600" />
-                <span>Have a Promo Code? (Try &quot;TRAVEL20&quot;)</span>
-              </label>
+          <div className="space-y-4">
+            {/* Promo Code Input */}
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+              <span className="text-xs font-bold text-slate-700 block">Have a Coupon or Promo Code?</span>
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="Enter promo code"
+                  placeholder="Enter code (e.g. TRAVEL20)"
                   value={promoCode}
                   onChange={(e) => setPromoCode(e.target.value)}
-                  className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-xl uppercase font-bold focus:outline-none focus:border-brand-500"
+                  className="flex-1 px-3 py-2 text-xs uppercase font-mono rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 bg-white"
                 />
-                <Button size="sm" variant="outline" onClick={handleApplyPromo}>
+                <Button variant="outline" size="sm" onClick={handleApplyPromo} className="font-bold text-xs">
                   Apply
                 </Button>
               </div>
               {promoMessage && (
-                <p className={`text-xs font-semibold ${discountPercent > 0 ? 'text-emerald-600' : 'text-slate-600'}`}>
+                <p className={`text-[11px] font-semibold ${discountPercent > 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
                   {promoMessage}
                 </p>
               )}
@@ -409,7 +493,7 @@ export const BookingModal = ({
               {walletBalance >= finalPrice ? (
                 <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200/80 flex items-center gap-2 text-xs font-semibold text-emerald-800">
                   <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <span>Sufficient balance available: 1-click instant deduction upon confirmation.</span>
+                  <span>Sufficient balance available. SMS OTP authentication will confirm this purchase.</span>
                 </div>
               ) : (
                 <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-2 text-xs font-semibold text-amber-800">
@@ -441,7 +525,7 @@ export const BookingModal = ({
                 </div>
               )}
               <div className="flex justify-between text-slate-600">
-                <span>Taxes & Carrier Surcharges</span>
+                <span>Taxes &amp; Carrier Surcharges</span>
                 <span className="text-emerald-600 font-bold">Included</span>
               </div>
               <div className="border-t border-slate-200 pt-2 flex justify-between font-black text-sm text-slate-900">
@@ -459,11 +543,12 @@ export const BookingModal = ({
               {walletBalance >= finalPrice ? (
                 <Button
                   variant="accent"
-                  onClick={handleCreateBooking}
-                  loading={loading}
+                  onClick={handleProceedToOtp}
+                  loading={otpLoading}
                   className="font-bold px-8 shadow-md hover:shadow-lg flex items-center gap-2"
                 >
-                  <span>Pay {formatCurrency(finalPrice, currency, exchangeRates)} & Confirm</span>
+                  <Lock className="h-4 w-4" />
+                  <span>Authorize Purchase with SMS OTP</span>
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               ) : (
@@ -480,17 +565,114 @@ export const BookingModal = ({
           </div>
         )}
 
-        {/* STEP 3: Booking Confirmation Screen */}
-        {step === 3 && confirmedBooking && (
+        {/* STEP 3: OTP 2FA Security Authorization (Powered by OTP.dev) */}
+        {step === 3 && (
+          <form onSubmit={handleVerifyAndConfirm} className="space-y-5 py-2">
+            <div className="p-5 rounded-2xl bg-gradient-to-br from-indigo-50/70 via-brand-50/50 to-slate-50 border border-brand-200 text-center space-y-3">
+              <div className="h-12 w-12 rounded-2xl bg-brand-600 text-white flex items-center justify-center mx-auto shadow-md shadow-brand-500/20">
+                <ShieldCheck className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900 tracking-tight">
+                  Two-Factor Security Verification
+                </h3>
+                <p className="text-xs text-slate-600 mt-1 max-w-md mx-auto leading-relaxed">
+                  To protect your digital wallet balance and secure your account against unauthorized transactions, a 6-digit security code has been dispatched via SMS to:
+                </p>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 mt-2 rounded-full bg-brand-100 text-brand-800 font-mono font-bold text-xs">
+                  <Smartphone className="h-3.5 w-3.5 text-brand-600" />
+                  <span>{maskedPhone || contact.phone || user?.phone}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* OTP Input Box */}
+            <div className="space-y-2 text-center max-w-xs mx-auto">
+              <label htmlFor="otpCodeInput" className="text-xs font-bold text-slate-700 block uppercase tracking-wider">
+                Enter 6-Digit OTP Code
+              </label>
+              <input
+                id="otpCodeInput"
+                type="text"
+                autoFocus
+                maxLength={6}
+                required
+                placeholder="••••••"
+                value={otpCode}
+                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                className="w-full text-center tracking-[0.5em] font-mono text-2xl font-black py-3 rounded-2xl border-2 border-brand-300 focus:outline-none focus:border-brand-600 bg-white shadow-inner"
+              />
+              <span className="text-[11px] text-slate-400 block">
+                Verification powered by OTP.dev Carrier Gateway
+              </span>
+            </div>
+
+            {/* Dev Demo Quickfill Helper */}
+            {devCode && (
+              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200/80 max-w-sm mx-auto flex items-center justify-between text-xs text-amber-800">
+                <span>
+                  Demo Mode Code: <strong className="font-mono">{devCode}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setOtpCode(devCode)}
+                  className="font-bold underline text-amber-900 hover:text-amber-700"
+                >
+                  Quickfill
+                </button>
+              </div>
+            )}
+
+            {/* Resend Cooldown / Actions */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setStep(2)}
+                disabled={loading}
+              >
+                Back to Review
+              </Button>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={otpCooldown > 0 || otpLoading}
+                  onClick={handleResendOtp}
+                  className="text-xs font-bold text-slate-600 hover:text-brand-600 disabled:opacity-50 flex items-center gap-1"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>
+                    {otpCooldown > 0 ? `Resend code in ${otpCooldown}s` : 'Resend OTP'}
+                  </span>
+                </button>
+
+                <Button
+                  type="submit"
+                  variant="primary"
+                  loading={loading}
+                  className="px-6 font-bold flex items-center gap-1.5"
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  <span>Verify &amp; Confirm Booking</span>
+                </Button>
+              </div>
+            </div>
+          </form>
+        )}
+
+        {/* STEP 4: Booking Confirmation Screen */}
+        {step === 4 && confirmedBooking && (
           <div className="space-y-6 text-center py-4">
             <div className="h-16 w-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
               <CheckCircle2 className="h-9 w-9" />
             </div>
 
             <div>
-              <h3 className="text-2xl font-black text-slate-900">Booking Submitted!</h3>
+              <h3 className="text-2xl font-black text-slate-900">Booking Verified &amp; Confirmed!</h3>
               <p className="text-xs text-slate-500 mt-1">
-                Your reservation has been received and is <strong>pending confirmation</strong> by our operations team.
+                Your reservation has been authenticated and processed. Official PNR reference is generated.
               </p>
             </div>
 

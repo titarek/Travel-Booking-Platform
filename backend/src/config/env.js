@@ -29,4 +29,7 @@ export const env = {
   UNSPLASH_API_KEY: process.env.UNSPLASH_API_KEY || '',
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || 'sk_test_51MzTravelBookingGatewayLiveTestKey8821',
   GEOAPIFY_API_KEY: process.env.GEOAPIFY_API_KEY || '7ce40ffb71cf4ca59ea23cc96d69bb67',
+  OTP_DEV_API_KEY: process.env.OTP_DEV_API_KEY || '9f47ac92e928541a570b67e10c9066de',
+  OTP_DEV_SENDER: process.env.OTP_DEV_SENDER || 'OTP Dev',
+  OTP_DEV_TEMPLATE_ID: process.env.OTP_DEV_TEMPLATE_ID || '8a07c794-331c-4111-b4e6-152cbebdec68',
 };

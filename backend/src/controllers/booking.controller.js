@@ -5,11 +5,30 @@ import { WalletTransaction } from '../models/walletTransaction.model.js';
 import { memoryStore } from '../utils/memoryStore.js';
 import { notifyAdminClients } from '../utils/realtime.js';
 import { isDbConnected, query } from '../config/db.js';
+import { sendBookingOtp, verifyBookingOtp } from '../utils/otp.service.js';
 
 /**
  * Generate unique PNR reference like TRV-482910
  */
 const generatePNR = () => `TRV-${Math.floor(100000 + Math.random() * 900000)}`;
+
+/**
+ * Request OTP verification code for booking security authorization via OTP.dev
+ */
+export const requestBookingOtp = async (req, res, next) => {
+  try {
+    const userId = (req.user?.id || req.user?._id || '').toString();
+    const phone = req.body?.phone || req.user?.phone || '+8801700000000';
+    const result = await sendBookingOtp({ userId, phone });
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
 
 /**
  * Create a new booking
@@ -23,12 +42,29 @@ export const createBooking = async (req, res, next) => {
       contactInfo,
       totalPrice,
       paymentMethod = 'Travel Digital Wallet',
+      otpCode,
     } = req.body;
     const bookingReference = generatePNR();
     const transactionId = `TXN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const userId = (req.user.id || req.user._id || '').toString();
 
-    // 0. Verify and deduct funds from customer's Travel Digital Wallet
+    // 0. 2FA Security Authorization via OTP.dev
+    const phoneForOtp = contactInfo?.phone || req.user?.phone || '+8801700000000';
+    const otpVerification = await verifyBookingOtp({
+      userId,
+      phone: phoneForOtp,
+      code: otpCode,
+    });
+
+    if (!otpVerification.verified) {
+      return res.status(400).json({
+        success: false,
+        code: 'OTP_VERIFICATION_FAILED',
+        message: otpVerification.message || 'Valid 6-digit OTP code is required to authorize this purchase.',
+      });
+    }
+
+    // 1. Verify and deduct funds from customer's Travel Digital Wallet
     let currentBalance = 0;
     if (isDbConnected()) {
       try {

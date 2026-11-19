@@ -4,6 +4,7 @@ import { WalletTransaction } from '../models/walletTransaction.model.js';
 import { ManualDeposit } from '../models/manualDeposit.model.js';
 import { memoryStore } from '../utils/memoryStore.js';
 import { isDbConnected, query } from '../config/db.js';
+import { notifyAdminClients } from '../utils/realtime.js';
 
 /**
  * Get current user's wallet balance and transaction history
@@ -335,6 +336,9 @@ export const submitManualDeposit = async (req, res, next) => {
     }
     memoryStore.manualDeposits.unshift(depositRecord);
 
+    // Broadcast real-time SSE event to all connected admin dashboards
+    notifyAdminClients('deposit_created', depositRecord);
+
     return res.status(201).json({
       success: true,
       message: 'Deposit slip submitted successfully! Our support team will verify and credit your wallet shortly.',
@@ -450,6 +454,8 @@ export const approveManualDeposit = async (req, res, next) => {
           ['APPROVED', adminEmail, id],
         );
 
+        notifyAdminClients('deposit_updated', { id, _id: id, status: 'APPROVED', approvedBy: adminEmail, approvedAt: nowIso });
+
         return res.status(200).json({
           success: true,
           message: `Deposit of $${depositAmount.toFixed(2)} approved and credited to customer wallet!`,
@@ -549,6 +555,8 @@ export const approveManualDeposit = async (req, res, next) => {
     if (!memoryStore.walletTransactions) memoryStore.walletTransactions = [];
     memoryStore.walletTransactions.unshift(tx);
 
+    notifyAdminClients('deposit_updated', { id, _id: id, status: 'APPROVED', approvedBy: adminEmail, approvedAt: nowIso });
+
     return res.status(200).json({
       success: true,
       message: `Deposit of $${deposit.amount.toFixed(2)} approved and credited to customer wallet!`,
@@ -579,6 +587,7 @@ export const rejectManualDeposit = async (req, res, next) => {
           'UPDATE manual_deposits SET status = $1, approved_by = $2, approved_at = NOW(), updated_at = NOW() WHERE id = $3',
           ['REJECTED', adminEmail, id],
         );
+        notifyAdminClients('deposit_updated', { id, _id: id, status: 'REJECTED', approvedBy: adminEmail, approvedAt: nowIso });
         return res.status(200).json({
           success: true,
           message: 'Deposit request has been marked as REJECTED.',
@@ -617,6 +626,8 @@ export const rejectManualDeposit = async (req, res, next) => {
     deposit.approvedBy = adminEmail;
     deposit.approvedAt = nowIso;
     deposit.updatedAt = nowIso;
+
+    notifyAdminClients('deposit_updated', { id, _id: id, status: 'REJECTED', approvedBy: adminEmail, approvedAt: nowIso });
 
     return res.status(200).json({
       success: true,
