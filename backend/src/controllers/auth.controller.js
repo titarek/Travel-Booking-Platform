@@ -4,6 +4,7 @@ import { User } from '../models/user.model.js';
 import { generateToken } from '../utils/jwt.js';
 import { memoryStore } from '../utils/memoryStore.js';
 import { isDbConnected, query } from '../config/db.js';
+import { sendBookingOtp } from '../utils/otp.service.js';
 
 /**
  * Register a new customer
@@ -469,8 +470,14 @@ export const updateProfile = async (req, res, next) => {
 
     if (isDbConnected()) {
       try {
-        let queryStr = 'UPDATE users SET name = COALESCE($1, name), phone = COALESCE($2, phone), security_question = COALESCE($3, security_question), updated_at = NOW()';
-        const params = [name || null, phone || null, securityQuestion || null];
+        await query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(50) DEFAULT '';
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS security_question VARCHAR(255) DEFAULT '';
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS security_answer_hash VARCHAR(255) DEFAULT '';
+        `).catch(() => {});
+
+        let queryStr = 'UPDATE users SET name = COALESCE($1, name), phone = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE phone END, security_question = COALESCE($3, security_question), updated_at = NOW()';
+        const params = [name || null, phone !== undefined ? phone : null, securityQuestion || null];
 
         if (securityAnswerHash) {
           queryStr += ', security_answer_hash = $4 WHERE id = $5 RETURNING id, name, email, phone, role, security_question, wallet_balance, created_at';
@@ -490,17 +497,17 @@ export const updateProfile = async (req, res, next) => {
           _id: row.id,
           name: row.name,
           email: row.email,
-          phone: row.phone,
+          phone: row.phone || '',
           role: (row.role || 'CUSTOMER').toUpperCase(),
           securityQuestion: row.security_question,
           walletBalance: Number(row.wallet_balance != null ? row.wallet_balance : 1000),
           createdAt: row.created_at,
         };
       } catch (colErr) {
-        console.warn(`[updateProfile] Extended update failed (${colErr.message}), falling back to base columns`);
+        console.warn(`[updateProfile] Extended update failed (${colErr.message}), falling back to direct update`);
         const fallbackRes = await query(
-          'UPDATE users SET name = COALESCE($1, name), updated_at = NOW() WHERE id = $2 RETURNING id, name, email, role, created_at',
-          [name || null, userId],
+          'UPDATE users SET name = COALESCE($1, name), phone = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE phone END, updated_at = NOW() WHERE id = $3 RETURNING id, name, email, phone, role, wallet_balance, created_at',
+          [name || null, phone !== undefined ? phone : null, userId],
         );
         if (fallbackRes.rows.length === 0) {
           return res.status(404).json({ success: false, message: 'User not found.' });
@@ -511,9 +518,9 @@ export const updateProfile = async (req, res, next) => {
           _id: row.id,
           name: row.name,
           email: row.email,
-          phone: '',
+          phone: row.phone || (phone !== undefined ? phone : ''),
           role: (row.role || 'CUSTOMER').toUpperCase(),
-          walletBalance: 1000,
+          walletBalance: Number(row.wallet_balance != null ? row.wallet_balance : 1000),
           createdAt: row.created_at,
         };
       }
@@ -534,7 +541,7 @@ export const updateProfile = async (req, res, next) => {
         _id: uDoc._id.toString(),
         name: uDoc.name,
         email: uDoc.email,
-        phone: uDoc.phone,
+        phone: uDoc.phone || '',
         role: (uDoc.role || 'CUSTOMER').toUpperCase(),
         securityQuestion: uDoc.securityQuestion,
         walletBalance: Number(uDoc.walletBalance != null ? uDoc.walletBalance : 1000),
@@ -558,7 +565,7 @@ export const updateProfile = async (req, res, next) => {
         _id: memUser.id || memUser._id.toString(),
         name: memUser.name,
         email: memUser.email,
-        phone: memUser.phone,
+        phone: memUser.phone || '',
         role: (memUser.role || 'CUSTOMER').toUpperCase(),
         securityQuestion: memUser.securityQuestion,
         walletBalance: Number(memUser.walletBalance != null ? memUser.walletBalance : 1000),
@@ -713,6 +720,139 @@ export const changePassword = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: 'Your password has been changed successfully.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Update authenticated user phone number
+ */
+export const changePhone = async (req, res, next) => {
+  try {
+    const userId = (req.user.id || req.user._id || '').toString();
+    const { newPhone, currentPassword } = req.body;
+
+    const trimmedPhone = (newPhone || '').trim();
+    if (!trimmedPhone) {
+      return res.status(400).json({ success: false, message: 'Please provide a valid phone number.' });
+    }
+
+    // Verify current password if supplied
+    if (currentPassword) {
+      let passwordHash = null;
+      if (isDbConnected()) {
+        const userRes = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+        if (userRes.rows.length === 0) {
+          return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        passwordHash = userRes.rows[0].password_hash;
+      } else if (mongoose.connection.readyState === 1) {
+        const uDoc = await User.findById(userId).select('+passwordHash');
+        if (!uDoc) {
+          return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        passwordHash = uDoc.passwordHash;
+      } else {
+        const memUser = memoryStore.users.find((u) => (u.id || u._id || '').toString() === userId);
+        if (!memUser) {
+          return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        passwordHash = memUser.passwordHash;
+      }
+
+      const isMatch = await bcrypt.compare(currentPassword, passwordHash);
+      if (!isMatch) {
+        return res.status(401).json({
+          success: false,
+          message: 'Incorrect current password. Verification failed.',
+        });
+      }
+    }
+
+    let updatedUser = null;
+    if (isDbConnected()) {
+      await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(50) DEFAULT \'\'').catch(() => {});
+      const updateRes = await query(
+        'UPDATE users SET phone = $1, updated_at = NOW() WHERE id = $2 RETURNING id, name, email, phone, role, security_question, wallet_balance, created_at',
+        [trimmedPhone, userId],
+      );
+      if (updateRes.rows.length > 0) {
+        const row = updateRes.rows[0];
+        updatedUser = {
+          id: row.id,
+          _id: row.id,
+          name: row.name,
+          email: row.email,
+          phone: row.phone || trimmedPhone,
+          role: (row.role || 'CUSTOMER').toUpperCase(),
+          securityQuestion: row.security_question,
+          walletBalance: Number(row.wallet_balance != null ? row.wallet_balance : 1000),
+          createdAt: row.created_at,
+        };
+      }
+    } else if (mongoose.connection.readyState === 1) {
+      const uDoc = await User.findByIdAndUpdate(userId, { phone: trimmedPhone }, { new: true });
+      if (uDoc) {
+        updatedUser = {
+          id: uDoc._id.toString(),
+          _id: uDoc._id.toString(),
+          name: uDoc.name,
+          email: uDoc.email,
+          phone: uDoc.phone,
+          role: (uDoc.role || 'CUSTOMER').toUpperCase(),
+          securityQuestion: uDoc.securityQuestion,
+          walletBalance: Number(uDoc.walletBalance != null ? uDoc.walletBalance : 1000),
+          createdAt: uDoc.createdAt,
+        };
+      }
+    } else {
+      const memUser = memoryStore.users.find((u) => (u.id || u._id || '').toString() === userId);
+      if (memUser) {
+        memUser.phone = trimmedPhone;
+        updatedUser = {
+          id: memUser.id || memUser._id.toString(),
+          _id: memUser.id || memUser._id.toString(),
+          name: memUser.name,
+          email: memUser.email,
+          phone: memUser.phone,
+          role: (memUser.role || 'CUSTOMER').toUpperCase(),
+          securityQuestion: memUser.securityQuestion,
+          walletBalance: Number(memUser.walletBalance != null ? memUser.walletBalance : 1000),
+          createdAt: memUser.createdAt,
+        };
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Mobile contact number has been updated successfully.',
+      phone: trimmedPhone,
+      user: updatedUser,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Dispatch test verification SMS to phone via OTP.dev
+ */
+export const sendPhoneTestOtp = async (req, res, next) => {
+  try {
+    const userId = (req.user?.id || req.user?._id || 'guest').toString();
+    const phone = req.body.phone || req.user?.phone;
+
+    if (!phone) {
+      return res.status(400).json({ success: false, message: 'Please specify a phone number to test.' });
+    }
+
+    const otpResult = await sendBookingOtp({ userId, phone });
+    return res.status(200).json({
+      success: true,
+      message: `Test OTP dispatched to ${otpResult.maskedPhone}`,
+      ...otpResult,
     });
   } catch (error) {
     return next(error);

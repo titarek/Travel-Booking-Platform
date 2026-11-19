@@ -134,6 +134,25 @@ export const AuthProvider = ({ children }) => {
     throw new Error(res.data?.message || 'Failed to update email');
   }, []);
 
+  const changePhone = useCallback(async (newPhone, currentPassword) => {
+    const res = await api.patch('/auth/change-phone', { newPhone, currentPassword });
+    if (res.data?.phone !== undefined) {
+      setUser((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev, phone: res.data.phone };
+        localStorage.setItem('travel_user', JSON.stringify(updated));
+        return updated;
+      });
+      return res.data;
+    }
+    throw new Error(res.data?.message || 'Failed to update phone number');
+  }, []);
+
+  const sendPhoneOtp = useCallback(async (phone) => {
+    const res = await api.post('/auth/send-phone-otp', { phone });
+    return res.data;
+  }, []);
+
   const changePassword = useCallback(async (currentPassword, newPassword) => {
     const res = await api.patch('/auth/change-password', { currentPassword, newPassword });
     return res.data;
@@ -247,6 +266,8 @@ export const AuthProvider = ({ children }) => {
     submitManualDeposit,
     updateWalletBalance,
     updateProfile,
+    changePhone,
+    sendPhoneOtp,
     changeEmail,
     changePassword,
     authModalState,
@@ -272,6 +293,8 @@ export const AuthProvider = ({ children }) => {
     submitManualDeposit,
     updateWalletBalance,
     updateProfile,
+    changePhone,
+    sendPhoneOtp,
     changeEmail,
     changePassword,
     authModalState,

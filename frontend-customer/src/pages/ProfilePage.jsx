@@ -6,6 +6,9 @@ import {
   Key,
   Mail,
   Phone,
+  Smartphone,
+  ShieldCheck,
+  Send,
   Wallet,
   CheckCircle2,
   AlertCircle,
@@ -28,6 +31,8 @@ export const ProfilePage = () => {
     user,
     openAuthModal,
     updateProfile,
+    changePhone,
+    sendPhoneOtp,
     changeEmail,
     changePassword,
     walletBalance,
@@ -50,6 +55,14 @@ export const ProfilePage = () => {
   });
   const [profileLoading, setProfileLoading] = useState(false);
 
+  // Change Phone form (Login & Security tab)
+  const [phoneForm, setPhoneForm] = useState({
+    newPhone: '',
+    currentPassword: '',
+  });
+  const [phoneLoading, setPhoneLoading] = useState(false);
+  const [testOtpLoading, setTestOtpLoading] = useState(false);
+
   // Change Email form
   const [emailForm, setEmailForm] = useState({
     newEmail: '',
@@ -65,17 +78,27 @@ export const ProfilePage = () => {
   });
   const [passwordLoading, setPasswordLoading] = useState(false);
 
+  // Sync wallet data on mount
   useEffect(() => {
-    if (user) {
-      setProfileForm({
-        name: user.name || '',
-        phone: user.phone || '',
-        securityQuestion: user.securityQuestion || 'What is your favorite travel destination?',
-        securityAnswer: '',
-      });
-      fetchWallet();
+    fetchWallet();
+  }, [fetchWallet]);
+
+  const userId = user?.id || user?._id;
+  const userName = user?.name;
+  const userPhone = user?.phone;
+  const userSecQ = user?.securityQuestion;
+
+  // Sync personal form state only when personal identity fields change
+  useEffect(() => {
+    if (userId) {
+      setProfileForm((prev) => ({
+        ...prev,
+        name: userName || '',
+        phone: userPhone || '',
+        securityQuestion: userSecQ || 'What is your favorite travel destination?',
+      }));
     }
-  }, [user, fetchWallet]);
+  }, [userId, userName, userPhone, userSecQ]);
 
   const showNotification = (text, type = 'success') => {
     setStatusMessage({ text, type });
@@ -111,12 +134,50 @@ export const ProfilePage = () => {
     setStatusMessage(null);
     try {
       await updateProfile(profileForm);
-      showNotification('Profile details updated successfully!');
+      showNotification('Profile details updated successfully! Mobile contact and preferences saved.');
       setProfileForm((prev) => ({ ...prev, securityAnswer: '' }));
     } catch (err) {
       showNotification(err.message || 'Failed to update profile.', 'error');
     } finally {
       setProfileLoading(false);
+    }
+  };
+
+  const handleChangePhone = async (e) => {
+    e.preventDefault();
+    const candidatePhone = phoneForm.newPhone.trim();
+    if (!candidatePhone || candidatePhone.length < 5) {
+      showNotification('Please enter a valid phone number (at least 5 digits).', 'error');
+      return;
+    }
+    setPhoneLoading(true);
+    setStatusMessage(null);
+    try {
+      await changePhone(candidatePhone, phoneForm.currentPassword);
+      showNotification(`Mobile contact number successfully updated to ${candidatePhone}!`);
+      setPhoneForm({ newPhone: '', currentPassword: '' });
+    } catch (err) {
+      showNotification(err.message || 'Could not update phone number.', 'error');
+    } finally {
+      setPhoneLoading(false);
+    }
+  };
+
+  const handleSendTestOtp = async () => {
+    const targetPhone = phoneForm.newPhone.trim() || user.phone;
+    if (!targetPhone || targetPhone.length < 5) {
+      showNotification('Please enter a phone number in the field above to receive a test SMS OTP.', 'error');
+      return;
+    }
+    setTestOtpLoading(true);
+    setStatusMessage(null);
+    try {
+      const res = await sendPhoneOtp(targetPhone);
+      showNotification(`✓ Test OTP SMS sent via OTP.dev to ${res.maskedPhone || targetPhone}! (Test Code: ${res.testOtpCode || 'Dispatched via SMS'})`);
+    } catch (err) {
+      showNotification(err.message || 'Failed to send test OTP via SMS.', 'error');
+    } finally {
+      setTestOtpLoading(false);
     }
   };
 
@@ -246,8 +307,8 @@ export const ProfilePage = () => {
           {/* Sidebar Tabs */}
           <div className="space-y-2">
             {[
-              { id: 'profile', label: 'Personal Information', icon: User, desc: 'Name, phone, security question' },
-              { id: 'security', label: 'Login & Security', icon: Key, desc: 'Email and password changes' },
+              { id: 'profile', label: 'Personal Information', icon: User, desc: 'Name, contact, security recovery' },
+              { id: 'security', label: 'Login & Security', icon: Key, desc: 'Phone, email, and password changes' },
               { id: 'wallet', label: 'Travel Wallet & Ledger', icon: Wallet, desc: 'Balance and deposit records' },
             ].map((tab) => {
               const Icon = tab.icon;
@@ -318,12 +379,18 @@ export const ProfilePage = () => {
                       required
                     />
 
-                    <Input
-                      label="Mobile Contact Number"
-                      value={profileForm.phone}
-                      onChange={(e) => setProfileForm((prev) => ({ ...prev, phone: e.target.value }))}
-                      placeholder="+880 1700 000000"
-                    />
+                    <div className="space-y-1">
+                      <Input
+                        label="Mobile Contact Number"
+                        value={profileForm.phone}
+                        onChange={(e) => setProfileForm((prev) => ({ ...prev, phone: e.target.value }))}
+                        placeholder="+880 1700 000000"
+                      />
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1 pl-1">
+                        <ShieldCheck className="h-3 w-3 text-emerald-600 inline shrink-0" />
+                        <span>Used for 2FA Booking SMS OTP verifications via OTP.dev</span>
+                      </span>
+                    </div>
                   </div>
 
                   <div className="pt-2 border-t border-slate-100 space-y-3">
@@ -377,6 +444,84 @@ export const ProfilePage = () => {
             {/* TAB 2: Login & Security */}
             {activeTab === 'security' && (
               <div className="space-y-6">
+                {/* Change Mobile Contact Number Card */}
+                <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-sm space-y-5">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-black text-slate-900">Change Mobile Contact Number</h3>
+                        <Badge variant="success" className="text-[10px]">2FA Active</Badge>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        Update your registered mobile phone number used for SMS OTP authorization during flight &amp; hotel purchases.
+                      </p>
+                    </div>
+                    <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                      <Smartphone className="h-4 w-4" />
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleChangePhone} className="space-y-4">
+                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Phone className="h-4 w-4 text-slate-400" />
+                        <span className="text-slate-500">Current Registered Number:</span>
+                        <strong className="text-slate-900 font-bold">{user.phone || 'Not Configured Yet'}</strong>
+                      </div>
+                      <span className="text-[11px] text-emerald-700 font-semibold bg-emerald-100/70 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                        <ShieldCheck className="h-3 w-3" /> OTP.dev 2FA Connected
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <Input
+                          label="New Mobile Phone Number"
+                          type="tel"
+                          value={phoneForm.newPhone}
+                          onChange={(e) => setPhoneForm((prev) => ({ ...prev, newPhone: e.target.value }))}
+                          placeholder="+880 1712 000000"
+                          required
+                        />
+                        <span className="text-[10px] text-slate-400 block mt-1">
+                          International format recommended (e.g. +88017... or 017...)
+                        </span>
+                      </div>
+
+                      <Input
+                        label="Current Password (Optional Verification)"
+                        type="password"
+                        value={phoneForm.currentPassword}
+                        onChange={(e) => setPhoneForm((prev) => ({ ...prev, currentPassword: e.target.value }))}
+                        placeholder="Enter current password (optional)..."
+                      />
+                    </div>
+
+                    <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleSendTestOtp}
+                        loading={testOtpLoading}
+                        className="text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 gap-1.5 w-full sm:w-auto"
+                      >
+                        <Send className="h-3.5 w-3.5 text-brand-600" />
+                        <span>Send Test SMS OTP to this Phone</span>
+                      </Button>
+
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        loading={phoneLoading}
+                        className="font-bold px-6 w-full sm:w-auto"
+                      >
+                        Update Phone Number
+                      </Button>
+                    </div>
+                  </form>
+                </div>
+
                 {/* Change Email Address Card */}
                 <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-sm space-y-5">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-4">

@@ -9,6 +9,8 @@ import {
   updateProfile,
   changeEmail,
   changePassword,
+  changePhone,
+  sendPhoneTestOtp,
 } from '../controllers/auth.controller.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authenticate } from '../middleware/auth.middleware.js';
@@ -54,9 +56,16 @@ const forgotResetSchema = {
 const updateProfileSchema = {
   body: z.object({
     name: z.string().min(2, 'Name must be at least 2 characters').max(80).optional(),
-    phone: z.string().max(25).optional(),
+    phone: z.string().max(35).optional().nullable(),
     securityQuestion: z.string().max(255).optional(),
     securityAnswer: z.string().max(255).optional(),
+  }).strict(),
+};
+
+const changePhoneSchema = {
+  body: z.object({
+    newPhone: z.string().min(5, 'Please provide a valid phone number (at least 5 digits)').max(35),
+    currentPassword: z.string().optional(),
   }).strict(),
 };
 
@@ -82,7 +91,9 @@ router.get('/me', authenticate, getMe);
 
 // Authenticated Account & Profile Management
 router.patch('/profile', authenticate, validate(updateProfileSchema), updateProfile);
+router.patch('/change-phone', authenticate, validate(changePhoneSchema), changePhone);
 router.patch('/change-email', authenticate, validate(changeEmailSchema), changeEmail);
 router.patch('/change-password', authenticate, validate(changePasswordSchema), changePassword);
+router.post('/send-phone-otp', authenticate, sendPhoneTestOtp);
 
 export default router;
